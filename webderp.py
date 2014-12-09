@@ -51,29 +51,73 @@ class Handler(myserver.ResponseHandler):
             if name:
                 print('unindex',name)
                 yield gnunet.unindex(name)
-        chk, name, result = good
-        # could yield, but this is cheaper :p
-        yield add_future(gnunet.download(chk),self.sendfile)
+        chk, name, info = good
+        result = yield self.startDownload(chk,name,info)
+        raise Return(result)
+    progress = None
+    def startDownload(self,chk,name,info):
+        "override this to do stuff if you don't care what the file type or publication date is"
+        type = info.get('mimetype')
+        modification = time.gmtime(info['publication date'])
+        return self.download(chk,type,modification,name,result)
+    def download(self,type,modification,name,info,progress=None):
+        "augment this to setup stuff according to the file type, HTML filters etc"
+        # and by augment I mean override it, then call it w/ progress.
 
+        # in here you handle the type and modification 
+        # instead of re-parsing them out of the info
+        # is this too much granularity?
+
+        return add_future(gnunet.download(chk,progress,type,modification),
+                partial(self.sendfile,info))
+    queryShortcuts = (
+            ('p', 'publication date')
+            ('m', 'mimetype')
+            )
     def getCHK(self):
-        chk = 'gnunet://fs' + self.path
-        return add_future(gnunet.download(chk),self.sendfile)
+        try: path, query = self.path.split('?',1)
+        except ValueError:
+            info = {}
+        else:
+            info = dict(n,gnunet.decode(n,v) for n,v in ((unescape(n),unescape(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
+            for n,long in self.queryShortcuts:
+                if n in info:
+                    info[long] = info[n]
+                    del info[n]
+        try: path,name = path.rsplit('/',-1)
+        except ValueError:
+            name = None
+        chk = 'gnunet://fs' + path
+        return add_future(gnunet.startDownload(chk,name,info),self.download)
     @tracecoroutine
-    def sendfile(self,temp,type,length):
+    def sendfile(self,info,temp,type,length):
+        "override this to do things with the contents of the file, transform HTML, check for spam, etc"
+        # note: the type argument is more reliable than info['mimetype'] 
+        # as it's guessed from the file contents even if info has no mimetype record
         note('sending')
         temp.seek(0,0)
         yield self.send_header('Content-Type',type)
+        modified = info.get('publication date')
+        if modified:
+            yield self.send_header('Last-Modified',self.date_time_string(modified))
         yield self.set_length(length)
         yield self.end_headers()
         buf = bytearray(0x1000)
         total = 0
+        # Can't use X-SendFile because it offers no notification of when the file has
+        # been started sending (and can be deleted) or has been sent.
         while True:
             amt = temp.readinto(buf)
             if amt <= 0: break
             total += amt
             yield self.write(memoryview(buf)[:amt])
+        del temp
+        # don't return temp, so that it can be garbage collected
+        raise Return(info,type,length)
 
 Handler.default = os.environ['root']
+if Handler.default.startswith('gnunet://fs'):
+    Handler.default = Handler.default[len('gnunet://fs'):]
 
 myserver.Server(Handler).listen(8444)
 ioloop.IOLoop.instance().start()

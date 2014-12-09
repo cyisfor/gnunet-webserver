@@ -130,7 +130,7 @@ def search(kw,limit=None):
     return searches.add(kw,search2(kw,limit),0)
 
 @tracecoroutine
-def watchDownload(chk,inp):
+def watchDownload(chk,inp,progress=None):
     while True:
         try: line = yield inp.read_until(b'\n')
         except StreamClosedError: break
@@ -142,31 +142,37 @@ def watchDownload(chk,inp):
                 return
             for i,v in enumerate(match.groups()):
                 download[i+1] = v
+            if progress: 
+                # TODO: some kind of abortion support?
+                progress(download)
 
 @tracecoroutine
-def download2(chk):
+def download2(chk, progress, type=None, modification=None):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watchDownload(action.stdout)
+    watchDownload(action.stdout,progress)
     yield exited
     buf = bytearray(0x1000)
-    type = derpmagic.guess_type(temp.fileno())[0]
+    if not type:
+        type = derpmagic.guess_type(temp.fileno())[0]
     temp.seek(0,2) # is this faster than fstat?
     length = temp.tell()
     note('lengthb',length)
     temp.seek(0,0)
+    if modification:
+        os.utime(temp.fileno(),(modification,modification))
     # X-SendFile this baby
     # temp won't delete upon returning this, since not at 0 references
     raise Return((temp,type,length))
 
-def download(chk):
+def download(chk,progress=None, type=None, modification=None):
     download = downloads.get(chk)
     if download:
-        note('already downloado',download.finished._result)
+        note('already downloading',download.finished._result)
         return download.finished
-    return downloads.add(chk,download2(chk),0,None)
+    return downloads.add(chk,download2(chk,progress,type,modification),0,None)
 
 @tracecoroutine
 def indexed(take):
