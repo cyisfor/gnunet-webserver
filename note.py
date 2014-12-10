@@ -62,7 +62,7 @@ if 'debug' in os.environ:
         def __call__(self,*s):
             output(color('green'),s)
         def __getattr__(self,n):
-            return lambda *s: output(color(n),s)
+            return lambda *s,**kw: output(color(n,**kw),s)
         def monitor(self,module=None):
             if module:
                 if hasattr(module,'__name__'):

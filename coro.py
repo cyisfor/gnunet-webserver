@@ -22,7 +22,6 @@ def tracecoroutine(f):
                     thing = g.throw(e)
         except StopIteration: pass
         except gen.Return as e: 
-            note('yay returning',e)
             raise
         except:
             note.alarm('error in ',f)

@@ -41,7 +41,6 @@ def presentInfo(doc,dl,info):
 goofs = len('gnunet://fs')
 
 def buildLink(chk,name,info):
-    href = chk[goofs:] 
     if name:
         href += '/' + name
     if info:
@@ -49,7 +48,7 @@ def buildLink(chk,name,info):
     return href
 
 @tracecoroutine
-def processDirectory(chk,info,temp):
+def processDirectory(parentchk,info,temp):
     doc = BeautifulSoup(directoryTemplate)
     presentInfo(doc,doc.find(id='info'),info)
     entries = doc.find(id='entries')
@@ -58,7 +57,11 @@ def processDirectory(chk,info,temp):
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
         a = doc.new_tag('a')
-        a['href'] = buildLink(chk,name,info)
+        if 'mimetype' in info:
+            info['subtype'] = info['mimetype']
+            info['mimetype'] = 'application/gnunet-directory'
+        a['href'] = buildLink('/dir/'+parentchk[goofs+4:],name,info)
+        a['title'] = chk # don't go to this, since we want to remember our parent directory
         a.append(chk[goofs+5:goofs+5+8].upper())
         td.append(a)
         entry.append(td)
@@ -85,20 +88,25 @@ class Handler(baseserver.Handler):
         note('wrote blob',type)
     @tracecoroutine
     def sendfile(self,chk,sub,info,temp,type,length):
+        note.yellow('type',type,bold=True)
         if type == 'application/gnunet-directory':
+            # XXX: if the sub-entry, is a subdirectory, switch to that for a chk?
             if sub:
+                note.yellow('sub-entry here',sub,bold=True)
                 # getting a directory entry here...
                 gotit = False
                 def oneResult(chk,name,info):
+                    note.blue('name',name,bold=True)
                     nonlocal gotit
                     if name == sub:
                         self.send_status(302,'over here')
-                        self.send_header('Location',buildLink(chk,name,info))
+                        self.send_header('Location',buildLink(chk[goofs:],name,info))
                         gotit = True
                         return True
-                yield gnunet.directory(chk)
+                yield gnunet.directory(temp.name,oneResult)
                 if not gotit:
                     self.write("Oh a wise guy, eh?")
+                return
             doc = yield processDirectory(chk,info,temp)
             del temp
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
@@ -114,7 +122,7 @@ class Handler(baseserver.Handler):
         elif type == 'application/x-shockwave-flash' and self.noflash:
             yield self.set_length(0)
         else:
-            yield super().sendfile(chk,info,temp,type,length)
+            yield super().sendfile(chk,sub,info,temp,type,length)
 
 Handler.default = os.environ['root']
 if Handler.default.startswith('gnunet://fs'):

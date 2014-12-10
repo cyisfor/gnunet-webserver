@@ -108,13 +108,12 @@ def directory(path,examine=None):
                 getting = True
             continue
         if not chk:
-            if line == '\n': break
+            if line == '\n': break # eof here
             name,chk = line.rsplit(' (',1)
             chk = chk[:-3] # extra paren, colon, newline
             result = {}
         else:
             line = line.strip()
-            note('line',repr(line))
             if line:
                 if line[0] == '<':
                     match = embedded.match(line)
@@ -124,9 +123,11 @@ def directory(path,examine=None):
                     prop,value = line.split(': ',1)
                     result[prop] = decode(prop,value)
             else:
-                note.yellow("got a thing")
                 if examine:
-                    examine(chk,name,result)
+                    finished = examine(chk,name,result)
+                    if finished:
+                        diract.stdout.close()
+                        break
                 else:
                     results.append((chk,name,result))
                 chk = None
@@ -192,6 +193,7 @@ def download2(chk, progress, type=None, modification=None):
     buf = bytearray(0x1000)
     if not type:
         type = derpmagic.guess_type(temp.fileno())[0]
+        note.yellow('type guessed',type)
     temp.seek(0,2) # is this faster than fstat?
     length = temp.tell()
     note('lengthb',length)

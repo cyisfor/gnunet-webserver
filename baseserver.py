@@ -29,20 +29,15 @@ class Handler(myserver.ResponseHandler):
         if self.path == '/':
             return self.redirect(self.default)
         else:
-            type,rest = self.path[1:].split('/',1)
-            if type == 'sks':
-                return self.cleanSKS()
-            elif type == 'chk':
-                return self.getCHK()
-            else:
-                raise RuntimeError('derp '+type)
+            kind,self.rest = self.path[1:].split('/',1)
+            getattr(self,'handle'+kind.upper())()
     @tracecoroutine
     def redirect(self,location):
         yield self.send_status('302','boink')
         yield self.send_header('Location',location)
         yield self.end_headers()
     @gen.coroutine
-    def cleanSKS(self):
+    def handleSKS(self):
         results = yield gnunet.search('gnunet://fs'+self.path)
         results.sort(key=lambda result: result[-1]['publication date'])
         indexfiles = {}
@@ -63,7 +58,7 @@ class Handler(myserver.ResponseHandler):
             ('p', 'publication date'),
             ('m', 'mimetype')
             )
-    def getCHK(self):
+    def handleCHK(self):
         try: path, query = self.path.split('?',1)
         except ValueError:
             path = self.path
@@ -74,7 +69,7 @@ class Handler(myserver.ResponseHandler):
                 if n in info:
                     info[long] = info[n]
                     del info[n]
-        try: path,name = path.rsplit('/',-1)
+        try: path,name = path.rsplit('/',1)
         except ValueError:
             name = None
         chk = 'gnunet://fs' + path
@@ -86,9 +81,9 @@ class Handler(myserver.ResponseHandler):
         "override this to do stuff if you don't care what the file type or publication date is"
         type = info.get('mimetype')
         modification = calendar.timegm(info['publication date'])
-        return self.download(chk,type,modification,name,info)
+        return self.download(chk,name,info,type,modification)
     @tracecoroutine
-    def download(self,chk,type,modification,name,info,progress=None):
+    def download(self,chk,name,info,type,modification,progress=None):
         "augment this to setup stuff according to the file type, HTML filters etc"
         # and by augment I mean override it, then call it w/ progress.
 
