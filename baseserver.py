@@ -114,10 +114,3 @@ class Handler(myserver.ResponseHandler):
         del temp
         # don't return temp, so that it can be garbage collected
         raise Return(info,type,length)
-
-Handler.default = os.environ['root']
-if Handler.default.startswith('gnunet://fs'):
-    Handler.default = Handler.default[len('gnunet://fs'):]
-
-myserver.Server(Handler).listen(8444)
-ioloop.IOLoop.instance().start()
