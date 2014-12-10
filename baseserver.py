@@ -7,7 +7,10 @@ note.monitor(__name__)
 from coro import tracecoroutine
 
 from tornado import gen, ioloop, iostream
+from tornado.gen import Return
 iostream.bytes_type = object # duck typing, you morons!
+
+from urllib.parse import unquote
 
 from functools import partial
 import calendar
@@ -44,8 +47,8 @@ class Handler(myserver.ResponseHandler):
         results.sort(key=lambda result: result[-1]['publication date'])
         indexfiles = {}
         yield gnunet.indexed(lambda tinychk,name: operator.setitem(indexfiles,tinychk.decode(),name))
-        good = results[0]
-        results = results[1:]
+        good = results[-1]
+        results = results[:-1]
         note(indexfiles.keys())
         for chk,*rest in results:
             tinychk = chk[0x10:0x10+8].upper()
@@ -56,22 +59,6 @@ class Handler(myserver.ResponseHandler):
         chk, name, info = good
         result = yield self.startDownload(chk,name,info)
         raise Return(result)
-    progress = None
-    def startDownload(self,chk,name,info):
-        "override this to do stuff if you don't care what the file type or publication date is"
-        type = info.get('mimetype')
-        modification = calendar.timegm(info['publication date'])
-        return self.download(chk,type,modification,name,info)
-    def download(self,chk,type,modification,name,info,progress=None):
-        "augment this to setup stuff according to the file type, HTML filters etc"
-        # and by augment I mean override it, then call it w/ progress.
-
-        # in here you handle the type and modification 
-        # instead of re-parsing them out of the info
-        # is this too much granularity?
-
-        return add_future(gnunet.download(chk,progress,type,modification),
-                partial(self.sendfile,info))
     queryShortcuts = (
             ('p', 'publication date'),
             ('m', 'mimetype')
@@ -79,9 +66,10 @@ class Handler(myserver.ResponseHandler):
     def getCHK(self):
         try: path, query = self.path.split('?',1)
         except ValueError:
+            path = self.path
             info = {}
         else:
-            info = dict((n,gnunet.decode(n,v)) for n,v in ((unescape(n),unescape(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
+            info = dict((n,gnunet.decode(n,v)) for n,v in ((unquote(n),unquote(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
             for n,long in self.queryShortcuts:
                 if n in info:
                     info[long] = info[n]
@@ -90,9 +78,29 @@ class Handler(myserver.ResponseHandler):
         except ValueError:
             name = None
         chk = 'gnunet://fs' + path
-        return add_future(gnunet.startDownload(chk,name,info),self.download)
+        note.blue(name,info)
+        info.setdefault('publication date',time.gmtime())
+        return self.startDownload(chk,name,info)
+    progress = None
+    def startDownload(self,chk,name,info):
+        "override this to do stuff if you don't care what the file type or publication date is"
+        type = info.get('mimetype')
+        modification = calendar.timegm(info['publication date'])
+        return self.download(chk,type,modification,name,info)
     @tracecoroutine
-    def sendfile(self,info,temp,type,length):
+    def download(self,chk,type,modification,name,info,progress=None):
+        "augment this to setup stuff according to the file type, HTML filters etc"
+        # and by augment I mean override it, then call it w/ progress.
+
+        # in here you handle the type and modification 
+        # instead of re-parsing them out of the info
+        # is this too much granularity?
+
+        temp,type,length = yield gnunet.download(chk,progress,type,modification)
+        result = yield self.sendfile(chk,info,temp,type,length)
+        raise Return(result)
+    @tracecoroutine
+    def sendfile(self,chk,info,temp,type,length):
         "override this to do things with the contents of the file, transform HTML, check for spam, etc"
         # note: the type argument is more reliable than info['mimetype'] 
         # as it's guessed from the file contents even if info has no mimetype record
@@ -115,4 +123,4 @@ class Handler(myserver.ResponseHandler):
             yield self.write(memoryview(buf)[:amt])
         del temp
         # don't return temp, so that it can be garbage collected
-        raise Return(info,type,length)
+        raise Return((info,type,length))

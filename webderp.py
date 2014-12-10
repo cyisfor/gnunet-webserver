@@ -2,9 +2,12 @@ import baseserver
 import myserver
 import gnunet
 
+import note
+
 from coro import tracecoroutine
 
 from tornado import ioloop
+from tornado.gen import Return
 from bs4 import BeautifulSoup
 
 import os
@@ -27,7 +30,7 @@ def presentInfo(doc,dl,info):
         dt = doc.new_tag('dt')
         dt.append(n)
         dd = doc.new_tag('dd')
-        dd.append(v)
+        dd.append(str(v))
         dl.append(dt)
         dl.append(dd)
 
@@ -50,21 +53,21 @@ def processDirectory(chk,info,temp):
         td.append(dl)
         entry.append(td)
         entries.append(entry)
-    yield gnunet.directory(temp,addEntry)
+    yield gnunet.directory(temp.name,addEntry)
     raise Return(doc)
 
 class Handler(baseserver.Handler):
     @tracecoroutine
     def sendblob(self,blob,type):
         yield self.send_header('Content-Type',type)
-        yield self.set_length(len(doc))
+        yield self.set_length(len(blob))
         yield self.end_headers()
-        yield self.write(doc)
+        yield self.write(blob)
         note('wrote blob',type)
     @tracecoroutine
-    def sendfile(self,info,temp,type,length):
+    def sendfile(self,chk,info,temp,type,length):
         if type == 'application/gnunet-directory':
-            doc = yield processDirectory(temp.name)
+            doc = yield processDirectory(chk,info,temp)
             del temp
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         elif type == 'text/html':
@@ -79,7 +82,7 @@ class Handler(baseserver.Handler):
         elif type == 'application/x-shockwave-flash' and self.noflash:
             yield self.set_length(0)
         else:
-            yield super().sendfile(info,temp,type,length)
+            yield super().sendfile(chk,info,temp,type,length)
 
 Handler.default = os.environ['root']
 if Handler.default.startswith('gnunet://fs'):
