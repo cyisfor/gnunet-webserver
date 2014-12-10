@@ -59,9 +59,9 @@ class Handler(myserver.ResponseHandler):
             ('m', 'mimetype')
             )
     def handleCHK(self):
-        try: path, query = self.path.split('?',1)
+        try: path, query = self.rest.split('?',1)
         except ValueError:
-            path = self.path
+            path = self.rest
             info = {}
         else:
             info = dict((n,gnunet.decode(n,v)) for n,v in ((unquote(n),unquote(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
@@ -72,8 +72,7 @@ class Handler(myserver.ResponseHandler):
         try: path,name = path.rsplit('/',1)
         except ValueError:
             name = None
-        chk = 'gnunet://fs' + path
-        note.blue(name,info)
+        chk = 'gnunet://fs/chk/' + path
         info.setdefault('publication date',time.gmtime())
         return self.startDownload(chk,name,info)
     progress = None

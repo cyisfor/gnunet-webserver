@@ -1,6 +1,8 @@
 import os
 from ansi import color,reset
 
+white = color('white',bold=True)
+
 def decode(o):
     if isinstance(o,Exception):
         return repr(o.value)
@@ -37,22 +39,35 @@ if 'debug' in os.environ:
         if not always and module not in modules: 
             return
 
+        o = io.TextIOWrapper(io.BytesIO(),encoding='utf-8')
+        def writec(c):
+            o.flush()
+            o.buffer.write(c)
+
+
         s = (decode(s) for s in s)
         s = ' '.join(s)
         hasret = '\n' in s
-
-        message = '== '+str(time.time())+' '+os.path.relpath(f.f_code.co_filename,here)+':'+str(f.f_lineno)
+        
+        o.write('== '+str(time.time())+' ')
+        writec(white)
+        o.write(os.path.relpath(f.f_code.co_filename,here))
+        writec(reset)
+        o.write(+':'+str(f.f_lineno))
         if hasret:
-            message += '\n'+'-'*60+'\n'
+            o.write('\n'+'-'*60+'\n')
         else:
-            message += '\n'
-        message = message.encode('utf-8') + color + s.encode('utf-8') + reset
+            o.write('\n')
+
+        writec(color)
+        o.write(s)
+        writec(reset)
 
         if hasret:
-            message += ('\n'+'-'*60+'\n').encode()
+            o.write('\n'+'-'*60+'\n')
         else:
-            message += '\n'.encode()
-        out.write(message)
+            o.write('\n')
+        out.write(o.getbytes())
         out.flush()
     class NoteModule:
         def note(self,*s):
