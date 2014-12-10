@@ -97,10 +97,10 @@ class Handler(myserver.ResponseHandler):
         # is this too much granularity?
 
         temp,type,length = yield gnunet.download(chk,progress,type,modification)
-        result = yield self.sendfile(chk,info,temp,type,length)
+        result = yield self.sendfile(chk,name,info,temp,type,length)
         raise Return(result)
     @tracecoroutine
-    def sendfile(self,chk,info,temp,type,length):
+    def sendfile(self,chk,name,info,temp,type,length):
         "override this to do things with the contents of the file, transform HTML, check for spam, etc"
         # note: the type argument is more reliable than info['mimetype'] 
         # as it's guessed from the file contents even if info has no mimetype record

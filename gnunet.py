@@ -35,6 +35,14 @@ def decode(prop,value):
         return tuple(int(i) for i in value.split('x'))
     return value
 
+def encode(prop, value):    
+    if hasattr(value,'tm_year'):
+        return time.ctime(time.mktime(value))
+    elif prop.endswith('dimensions'):
+        return 'x'.join(map(str,value))
+    else:
+        return str(value)
+
 anonymity = False
 
 def start(op,*args,**kw):
@@ -81,6 +89,8 @@ def watchSearch(kw,inp):
         search.amount += len(chunk)
     return inp.read_until_close(callback=lambda *a: None,streaming_callback=streaming)
 
+embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
+dircontents = re.compile("Directory `.*?\' contents:\n")
 @tracecoroutine
 def directory(path,examine=None):
     if not examine:
@@ -93,7 +103,8 @@ def directory(path,examine=None):
         except StreamClosedError: break
         line = line.decode('utf-8')
         if not getting:
-            if line == 'Directory `(null)\' contents:\n': 
+            if dircontents.match(line):
+                note.blue('yay getting')
                 getting = True
             continue
         if not chk:
@@ -103,10 +114,17 @@ def directory(path,examine=None):
             result = {}
         else:
             line = line.strip()
+            note('line',repr(line))
             if line:
-                prop,value = line.split(': ',1)
-                result[prop] = decode(prop,value)
+                if line[0] == '<':
+                    match = embedded.match(line)
+                    if match:
+                        result['size'] = match.group(1)
+                else:
+                    prop,value = line.split(': ',1)
+                    result[prop] = decode(prop,value)
             else:
+                note.yellow("got a thing")
                 if examine:
                     examine(chk,name,result)
                 else:

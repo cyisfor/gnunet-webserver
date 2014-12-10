@@ -14,6 +14,8 @@ def fixlink(link):
     if link.startswith('gnunet://fs'):
         return link[len('gnunet://fs'):]
 
+noDisplay = re.compile('display:\s*none')
+
 def sanitize(doc,base=None):
     for script in doc.findAll('script'):
         script.extract();
@@ -31,8 +33,6 @@ def sanitize(doc,base=None):
             img.attrs['src'] = fixlink(src)
     for style in doc.findAll('style'):
         style.string = sanestyle.sanitize(style.string)
-
-noDisplay = re.compile('display:\s*none')
 
     def cleanattrs(e):
         if e.name == 'a':

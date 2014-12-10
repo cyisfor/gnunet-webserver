@@ -1,3 +1,5 @@
+import re
+
 urlre = re.compile(r'url\s*\(([^)]*)\)')
 
 def sanitize(contents):

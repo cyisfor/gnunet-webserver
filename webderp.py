@@ -2,6 +2,8 @@ import baseserver
 import myserver
 import gnunet
 
+import sanehtml,sanestyle
+
 import note
 
 from coro import tracecoroutine
@@ -9,6 +11,8 @@ from coro import tracecoroutine
 from tornado import ioloop
 from tornado.gen import Return
 from bs4 import BeautifulSoup
+
+from urllib.parse import quote
 
 import os
 
@@ -30,9 +34,19 @@ def presentInfo(doc,dl,info):
         dt = doc.new_tag('dt')
         dt.append(n)
         dd = doc.new_tag('dd')
-        dd.append(str(v))
+        dd.append(gnunet.encode(n,v))
         dl.append(dt)
         dl.append(dd)
+
+goofs = len('gnunet://fs')
+
+def buildLink(chk,name,info):
+    href = chk[goofs:] 
+    if name:
+        href += '/' + name
+    if info:
+        href += '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
+    return href
 
 @tracecoroutine
 def processDirectory(chk,info,temp):
@@ -40,11 +54,15 @@ def processDirectory(chk,info,temp):
     presentInfo(doc,doc.find(id='info'),info)
     entries = doc.find(id='entries')
     def addEntry(chk,name,info):
+        note.yellow('entry',name)
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
-        td.append(chk)
+        a = doc.new_tag('a')
+        a['href'] = buildLink(chk,name,info)
+        a.append(chk[goofs+5:goofs+5+8].upper())
+        td.append(a)
         entry.append(td)
-        td = doc.new_Tag('td')
+        td = doc.new_tag('td')
         td.append(name)
         entry.append(td)
         td = doc.new_tag('td')
@@ -53,6 +71,7 @@ def processDirectory(chk,info,temp):
         td.append(dl)
         entry.append(td)
         entries.append(entry)
+    note.yellow('adding entries')
     yield gnunet.directory(temp.name,addEntry)
     raise Return(doc)
 
@@ -65,8 +84,21 @@ class Handler(baseserver.Handler):
         yield self.write(blob)
         note('wrote blob',type)
     @tracecoroutine
-    def sendfile(self,chk,info,temp,type,length):
+    def sendfile(self,chk,sub,info,temp,type,length):
         if type == 'application/gnunet-directory':
+            if sub:
+                # getting a directory entry here...
+                gotit = False
+                def oneResult(chk,name,info):
+                    nonlocal gotit
+                    if name == sub:
+                        self.send_status(302,'over here')
+                        self.send_header('Location',buildLink(chk,name,info))
+                        gotit = True
+                        return True
+                yield gnunet.directory(chk)
+                if not gotit:
+                    self.write("Oh a wise guy, eh?")
             doc = yield processDirectory(chk,info,temp)
             del temp
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
@@ -76,7 +108,7 @@ class Handler(baseserver.Handler):
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         elif type == 'text/css':
             assert length < 0x10000
-            contents = sanecss.sanitize(temp.read(length))
+            contents = sanestyle.sanitize(temp.read(length))
             del temp
             yield self.sendblob(contents.encode('utf-8'),'text/css')
         elif type == 'application/x-shockwave-flash' and self.noflash:
