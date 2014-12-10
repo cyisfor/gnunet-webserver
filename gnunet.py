@@ -129,7 +129,7 @@ def directory(path,examine=None):
                     prop,value = line.split(': ',1)
                     result[prop] = decode(prop,value)
             else:
-                note.orange('found a thing',name)
+                note.yellow('found a thing',name)
                 if examine:
                     finished = examine(chk,name,result)
                     if finished:
@@ -142,7 +142,6 @@ def directory(path,examine=None):
     if not examine:
         if not results:
             note.yellow('warning, empty directory',path)
-            s.call(['bash'])
         raise Return(results)
     else:
         note('examining')

@@ -29,7 +29,7 @@ class Handler(myserver.ResponseHandler):
         if self.path == '/':
             return self.redirect(self.default)
         else:
-            kind,self.rest = self.path[1:].split('/',1)
+            self.kind,self.rest = self.path[1:].split('/',1)
             return getattr(self,'handle'+kind.upper())()
     @tracecoroutine
     def redirect(self,location):
@@ -38,8 +38,27 @@ class Handler(myserver.ResponseHandler):
         yield self.end_headers()
     @gen.coroutine
     def handleSKS(self):
-        results = yield gnunet.search('gnunet://fs'+self.path)
+        self.ident,tail = self.rest.split('/',1)
+        if not '/' in tail:
+            # /sks/ident/keyword/filename
+            # with just keyword, these are always directories
+            # URLs for directories must end in / on the CLIENT side
+            # ...for relative links to work right.
+            yield self.redirect(self.path+'/')
+            return
+        self.keyword,self.filename = tail.split('/',1)
+        if '/' in self.filename:
+            # if a directory entry is itself a directory, this saves the sub-directory sub-part for it
+            # otherwise self.subsequent is ignored
+            self.filename,self.subsequent = self.filename.split('/',1)
+        # get the CHK for this SKS (the most recent one ofc)
+        results = yield gnunet.search('gnunet://fs/sks/'+self.ident+'/'+self.keyword)
         results.sort(key=lambda result: result[-1]['publication date'])
+        self.cleanSKS(results[:-1])
+        chk, name, info = results[-1]
+        result = yield self.startDownload(chk,name,info)
+        raise Return(result)
+    def cleanSKS(self,oldinfos):
         indexfiles = {}
         yield gnunet.indexed(lambda tinychk,name: operator.setitem(indexfiles,tinychk.decode(),name))
         good = results[-1]
@@ -51,9 +70,6 @@ class Handler(myserver.ResponseHandler):
             if name:
                 note('unindex',name)
                 yield gnunet.unindex(name)
-        chk, name, info = good
-        result = yield self.startDownload(chk,name,info)
-        raise Return(result)
     queryShortcuts = (
             ('p', 'publication date'),
             ('m', 'mimetype')
@@ -69,10 +85,11 @@ class Handler(myserver.ResponseHandler):
                 if n in info:
                     info[long] = info[n]
                     del info[n]
-        try: path,name = path.rsplit('/',1)
+        try: 
+            self.ident, name = path.split('/',1)
         except ValueError:
             name = None
-        chk = 'gnunet://fs/chk/' + path
+        chk = 'gnunet://fs/chk/' + self.ident
         info.setdefault('publication date',time.gmtime())
         return self.startDownload(chk,name,info)
     progress = None
@@ -95,7 +112,7 @@ class Handler(myserver.ResponseHandler):
         raise Return(result)
     @tracecoroutine
     def sendfile(self,chk,name,info,temp,type,length):
-        "override this to do things with the contents of the file, transform HTML, check for spam, etc"
+        "override this to do things with the contents of the file, transform HTML, check for spam, list directories, etc"
         # note: the type argument is more reliable than info['mimetype'] 
         # as it's guessed from the file contents even if info has no mimetype record
         note('sending')

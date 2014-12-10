@@ -16,6 +16,7 @@ import calendar
 from urllib.parse import quote
 
 import os
+oj = os.path.join
 
 directoryTemplate = '''<!DOCTYPE html><html>
 <head>
@@ -50,7 +51,7 @@ def buildLink(chk,name,info):
     return href
 
 @tracecoroutine
-def processDirectory(parentchk,info,temp):
+def processDirectory(parentchk,parentname,info,temp):
     doc = BeautifulSoup(directoryTemplate)
     presentInfo(doc,doc.find(id='info'),info)
     entries = doc.find(id='entries')
@@ -59,7 +60,7 @@ def processDirectory(parentchk,info,temp):
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
         a = doc.new_tag('a')
-        a['href'] = buildLink('/dir'+parentchk[goofs+4:],name,info)
+        a['href'] = buildLink('/dir'+parentchk[goofs+4:],oj(parentname,name),info)
         a['title'] = chk # don't go to this, since we want to remember our parent directory
         a.append(chk[goofs+5:goofs+5+8].upper())
         td.append(a)
@@ -89,6 +90,9 @@ class Handler(baseserver.Handler):
         yield self.write(blob)
         note('wrote blob',type)
     isdir = False
+    def handleSKS(self):
+        # keep the search URL for directories (and subdirectories) instead of 
+        # redirecting.
     def handleDIR(self):
         self.isdir = True
         return self.handleCHK()
@@ -103,11 +107,15 @@ class Handler(baseserver.Handler):
         modification = calendar.timegm(info['publication date'])
         return self.download(chk,name,info,type,modification)
     @tracecoroutine
-    def sendfile(self,chk,sub,info,temp,type,length):
+    def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
         note.yellow('type',type,bold=True)
         if type is True or type == 'application/gnunet-directory':
             # XXX: if the sub-entry, is a subdirectory, switch to that for a chk?
+            try:
+                name,sub = name.split('/',1)
+            except ValueError:
+                sub = None
             if sub:
                 note.yellow('sub-entry here',sub,bold=True)
                 # getting a directory entry here...
@@ -126,16 +134,17 @@ class Handler(baseserver.Handler):
                         return True
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
-                    name,chk,info = gotit
+                    chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
                         yield self.redirect('/dir'+chk[goofs+4:]+'/')
                     else:
                         # can't redirect to these since we need to allow relative links!
-                        yield self.startDownload(name,chk,info)
+                        yield self.startDownload(chk,name,info)
                 else:
                     self.write("Oh a wise guy, eh?")
                 return
-            doc = yield processDirectory(chk,info,temp)
+            # the directory itself, no sub-entry
+            doc = yield processDirectory(chk,name,info,temp)
             del temp
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         elif type == 'text/html':
@@ -144,14 +153,14 @@ class Handler(baseserver.Handler):
             note.yellow('Sanitized')
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         # XXX: this is wrong, and unsafe.
-        elif type == 'text/css' or type == 'text/plain' and sub.endswith('.css'):
+        elif type == 'text/css' or type == 'text/plain' and name.endswith('.css'):
             assert length < 0x10000
             contents = sanestyle.sanitize(temp.read(length).decode('utf-8'))
             yield self.sendblob(contents.encode('utf-8'),'text/css')
         elif type == 'application/x-shockwave-flash' and self.noflash:
             yield self.set_length(0)
         else:
-            yield super().sendfile(chk,sub,info,temp,type,length)
+            yield super().sendfile(chk,name,info,temp,type,length)
 
 Handler.default = os.environ['root']
 if Handler.default.startswith('gnunet://fs'):
