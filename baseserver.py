@@ -25,18 +25,22 @@ def add_future(future,what):
 class Handler(myserver.ResponseHandler):
     code = 200
     message = "Otay"
+    subsequent = None
+    filename = None
+    keyword = None
+    ident = None
     def get(self):
         if self.path == '/':
             return self.redirect(self.default)
         else:
             self.kind,self.rest = self.path[1:].split('/',1)
-            return getattr(self,'handle'+kind.upper())()
+            return getattr(self,'handle'+self.kind.upper())()
     @tracecoroutine
     def redirect(self,location):
         yield self.send_status('302','boink')
         yield self.send_header('Location',location)
         yield self.end_headers()
-    @gen.coroutine
+    @tracecoroutine
     def handleSKS(self):
         self.ident,tail = self.rest.split('/',1)
         if not '/' in tail:
@@ -57,7 +61,7 @@ class Handler(myserver.ResponseHandler):
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]
         result = yield self.startDownload(chk,name,info)
-        raise Return(result)
+        if result: raise Return(result)
     def cleanSKS(self,oldinfos):
         indexfiles = {}
         yield gnunet.indexed(lambda tinychk,name: operator.setitem(indexfiles,tinychk.decode(),name))

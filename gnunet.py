@@ -107,7 +107,6 @@ def directory(path,examine=None):
         try: line = yield diract.stdout.read_until(b'\n')
         except StreamClosedError: break
         line = line.decode('utf-8')
-        note('line',line)
         if not getting:
             if dircontents.match(line):
                 note.blue('yay getting',bold=True)
@@ -129,7 +128,6 @@ def directory(path,examine=None):
                     prop,value = line.split(': ',1)
                     result[prop] = decode(prop,value)
             else:
-                note.yellow('found a thing',name)
                 if examine:
                     finished = examine(chk,name,result)
                     if finished:

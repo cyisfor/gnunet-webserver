@@ -22,7 +22,11 @@ def tracecoroutine(f):
                     thing = g.throw(e)
         except StopIteration: pass
         except gen.Return as e: 
-            raise
+            # why this isn't default, no idea.
+            value = e.value
+            while gen.is_future(value):
+                value = yield value
+            raise gen.Return(value)
         except:
             note.alarm('error in ',f)
             traceback.print_exc()

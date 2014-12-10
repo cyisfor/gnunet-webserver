@@ -59,14 +59,16 @@ def processDirectory(info,path):
         note.yellow('entry',name)
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
-        a = doc.new_tag('a')
-        a['href'] = name # relative links woo
-        a['id'] = chk # don't go to this, since we want to remember our parent directory
-        a.append(name+'['+chk[goofs+5:goofs+5+8]+']')
-        td.append(a)
+        td.append(chk[goofs+5:goofs+5+8])
         entry.append(td)
         td = doc.new_tag('td')
-        td.append(name)
+        a = doc.new_tag('a')
+        a['href'] = name # relative links woo
+        if info['mimetype'] == 'application/gnunet-directory':
+            a['href'] += '/'
+        a['id'] = chk # don't go to this, since we want to remember our parent directory
+        a.append(name)
+        td.append(a)
         entry.append(td)
         td = doc.new_tag('td')
         dl = doc.new_tag('dl')
@@ -87,8 +89,7 @@ class Handler(baseserver.Handler):
         yield self.send_header('Content-Type',type)
         yield self.set_length(len(blob))
         yield self.end_headers()
-        yield self.write(blob)
-        note('wrote blob',type)
+        raise Return(self.write(blob))
     @tracecoroutine
     def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
@@ -108,37 +109,36 @@ class Handler(baseserver.Handler):
                 if gotit:
                     chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
-                        # going down....
-                        old = (self.filename,self.subsequent)
                         if self.subsequent:
                             self.filename = self.subsequent.pop(0)
                         else:
                             self.filename = None
                     else:
                         assert not self.subsequent, "No subdirs below a normal file!"
-                    yield self.startDownload(chk,name,info)
+                    # going down....
+                    raise Return(self.startDownload(chk,name,info))
                 else:
                     # a filename not in this directory.
                     self.write("Oh a wise guy, eh?")
                 return
             # the directory itself, no sub-entry filename
-            doc = yield self.processDirectory(info,temp.name)
+            doc = yield processDirectory(info,temp.name)
             del temp
-            yield self.sendblob(str(doc).encode('utf-8'),'text/html')
+            raise Return(self.sendblob(str(doc).encode('utf-8'),'text/html'))
         elif type == 'text/html':
             doc = BeautifulSoup(temp)
             sanehtml.sanitize(doc)
             note.yellow('Sanitized')
-            yield self.sendblob(str(doc).encode('utf-8'),'text/html')
+            raise Return(self.sendblob(str(doc).encode('utf-8'),'text/html'))
         # XXX: this is wrong, and unsafe.
         elif type == 'text/css' or type == 'text/plain' and name.endswith('.css'):
             assert length < 0x10000
             contents = sanestyle.sanitize(temp.read(length).decode('utf-8'))
-            yield self.sendblob(contents.encode('utf-8'),'text/css')
-        elif type == 'application/x-shockwave-flash' and self.noflash:
-            yield self.set_length(0)
+            raise Return(self.sendblob(contents.encode('utf-8'),'text/css'))
+        elif type == 'application/x-shockwave-flash' and self.noflash:            
+            raise Return(self.write("ha"))
         else:
-            yield super().sendfile(chk,name,info,temp,type,length)
+            raise Return(super().sendfile(chk,name,info,temp,type,length))
 
 Handler.default = os.environ['root']
 if Handler.default.startswith('gnunet://fs'):
