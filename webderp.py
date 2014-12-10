@@ -59,9 +59,6 @@ def processDirectory(parentchk,info,temp):
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
         a = doc.new_tag('a')
-        if 'mimetype' in info:
-            info['subtype'] = info['mimetype']
-            info['mimetype'] = 'application/gnunet-directory'
         a['href'] = buildLink('/dir'+parentchk[goofs+4:],name,info)
         a['title'] = chk # don't go to this, since we want to remember our parent directory
         a.append(chk[goofs+5:goofs+5+8].upper())
@@ -81,6 +78,9 @@ def processDirectory(parentchk,info,temp):
     raise Return(doc)
 
 class Handler(baseserver.Handler):
+    def __init__(self,*a,**kw):
+        note.magenta("Creating a Handler!",id(self))
+        super().__init__(*a,**kw)
     @tracecoroutine
     def sendblob(self,blob,type):
         yield self.send_header('Content-Type',type)
@@ -104,6 +104,7 @@ class Handler(baseserver.Handler):
         return self.download(chk,name,info,type,modification)
     @tracecoroutine
     def sendfile(self,chk,sub,info,temp,type,length):
+        temp.seek(0,0)
         note.yellow('type',type,bold=True)
         if type is True or type == 'application/gnunet-directory':
             # XXX: if the sub-entry, is a subdirectory, switch to that for a chk?
@@ -125,7 +126,12 @@ class Handler(baseserver.Handler):
                         return True
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
-                    yield self.startDownload(*gotit)
+                    name,chk,info = gotit
+                    if info['mimetype'] == 'application/gnunet-directory':
+                        yield self.redirect('/dir'+chk[goofs+4:]+'/')
+                    else:
+                        # can't redirect to these since we need to allow relative links!
+                        yield self.startDownload(name,chk,info)
                 else:
                     self.write("Oh a wise guy, eh?")
                 return
@@ -135,11 +141,12 @@ class Handler(baseserver.Handler):
         elif type == 'text/html':
             doc = BeautifulSoup(temp)
             sanehtml.sanitize(doc)
+            note.yellow('Sanitized')
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
-        elif type == 'text/css':
+        # XXX: this is wrong, and unsafe.
+        elif type == 'text/css' or type == 'text/plain' and sub.endswith('.css'):
             assert length < 0x10000
-            contents = sanestyle.sanitize(temp.read(length))
-            del temp
+            contents = sanestyle.sanitize(temp.read(length).decode('utf-8'))
             yield self.sendblob(contents.encode('utf-8'),'text/css')
         elif type == 'application/x-shockwave-flash' and self.noflash:
             yield self.set_length(0)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python2
-
+import note
 import sanestyle
 
 from bs4 import BeautifulSoup,Comment
@@ -60,9 +60,12 @@ def sanitize(doc,base=None):
                     d.append(attr)
                 if attr == 'style': 
                     if noDisplay.match(v):
+                        note.alarm('v is a bad style!',v)
                         e.extract()
                     else:
-                        e.attrs['style'] = sanestyle.sanitize(v)
+                        style = sanestyle.sanitize(v)
+                        print('new style for',e.tag,style)
+                        e.attrs['style'] = style
         for attr in d:
             del e[attr]
 

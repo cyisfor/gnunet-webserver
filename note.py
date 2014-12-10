@@ -1,4 +1,4 @@
-import os
+import os,io
 from ansi import color,reset
 
 white = color('white',bold=True)
@@ -53,7 +53,7 @@ if 'debug' in os.environ:
         writec(white)
         o.write(os.path.relpath(f.f_code.co_filename,here))
         writec(reset)
-        o.write(+':'+str(f.f_lineno))
+        o.write(':'+str(f.f_lineno))
         if hasret:
             o.write('\n'+'-'*60+'\n')
         else:
@@ -67,7 +67,8 @@ if 'debug' in os.environ:
             o.write('\n'+'-'*60+'\n')
         else:
             o.write('\n')
-        out.write(o.getbytes())
+        o.flush()
+        out.write(o.buffer.getbuffer())
         out.flush()
     class NoteModule:
         def note(self,*s):

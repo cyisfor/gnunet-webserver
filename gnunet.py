@@ -13,6 +13,8 @@ from tornado import gen,ioloop
 from tornado.iostream import StreamClosedError
 from tornado.gen import Return
 
+import subprocess as s
+
 from functools import partial
 import operator
 import traceback
@@ -49,6 +51,7 @@ def start(op,*args,**kw):
     if anonymity:
         args = ('--anonymity',str(anonymity))+args
     done = gen.Future()
+    note.cyan('gnunet-'+op+' '+' '.join(args))
     action = Subprocess(('gnunet-'+op,)+args,**kw)
     action.set_exit_callback(done.set_result)
     return action, done
@@ -84,8 +87,10 @@ def watchSearch(kw,inp):
     def streaming(chunk):
         search = searches.get(kw)
         if not search: 
+            note.magenta('search over for',kw)
             inp.close()
             return
+        note.magenta('search chunk',chunk)
         search.amount += len(chunk)
     return inp.read_until_close(callback=lambda *a: None,streaming_callback=streaming)
 
@@ -102,9 +107,10 @@ def directory(path,examine=None):
         try: line = yield diract.stdout.read_until(b'\n')
         except StreamClosedError: break
         line = line.decode('utf-8')
+        note('line',line)
         if not getting:
             if dircontents.match(line):
-                note.blue('yay getting')
+                note.blue('yay getting',bold=True)
                 getting = True
             continue
         if not chk:
@@ -123,6 +129,7 @@ def directory(path,examine=None):
                     prop,value = line.split(': ',1)
                     result[prop] = decode(prop,value)
             else:
+                note.orange('found a thing',name)
                 if examine:
                     finished = examine(chk,name,result)
                     if finished:
@@ -133,7 +140,9 @@ def directory(path,examine=None):
                 chk = None
     yield done
     if not examine:
-        assert results
+        if not results:
+            note.yellow('warning, empty directory',path)
+            s.call(['bash'])
         raise Return(results)
     else:
         note('examining')
@@ -148,9 +157,10 @@ def search2(kw,limit=None):
 
     action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
     watchSearch(kw,action.stdout)
-    yield done
+    code = yield done
+    note.magenta('code',code)
     results = yield directory(temp.name)
-    assert results
+    assert results, kw
     del temp
     # temp file will be deleted now (for search results), since no more references
     # results.sort(key=lambda result: result[1]['publication date']) do this later

@@ -30,7 +30,7 @@ class Handler(myserver.ResponseHandler):
             return self.redirect(self.default)
         else:
             kind,self.rest = self.path[1:].split('/',1)
-            getattr(self,'handle'+kind.upper())()
+            return getattr(self,'handle'+kind.upper())()
     @tracecoroutine
     def redirect(self,location):
         yield self.send_status('302','boink')
