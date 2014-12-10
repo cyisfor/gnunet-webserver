@@ -81,17 +81,9 @@ def watchSearch(kw,inp):
     return inp.read_until_close(callback=lambda *a: None,streaming_callback=streaming)
 
 @tracecoroutine
-def search2(kw,limit=None):
-    if limit:
-        limit = ('--results',str(limit))
-    else:
-        limit = ()
-    temp = tempo()
-
-    action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
-    watchSearch(kw,action.stdout)
-    yield done
-    results = []
+def directory(path,examine=None):
+    if not examine:
+        results = []
     diract,done = start('directory',temp.name,stdout=STREAM)
     getting = False
     chk = None
@@ -114,12 +106,30 @@ def search2(kw,limit=None):
                 prop,value = line.split(': ',1)
                 result[prop] = decode(prop,value)
             else:
-                results.append((chk,name,result))
+                if examine:
+                    examine(chk,name,result)
+                else:
+                    results.append((chk,name,result))
                 chk = None
-    del temp
-    # temp file will be deleted now, since no more references
-    # results.sort(key=lambda result: result[1]['publication date']) do this later
     yield done
+    if not examine:
+        raise Return(results)
+
+@tracecoroutine
+def search2(kw,limit=None):
+    if limit:
+        limit = ('--results',str(limit))
+    else:
+        limit = ()
+    temp = tempo()
+
+    action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
+    watchSearch(kw,action.stdout)
+    yield done
+    results = yield directory(temp.name)
+    del temp
+    # temp file will be deleted now (for search results), since no more references
+    # results.sort(key=lambda result: result[1]['publication date']) do this later
     raise Return(results)
 
 def search(kw,limit=None):
