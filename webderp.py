@@ -51,7 +51,7 @@ def buildLink(chk,name,info):
     return href
 
 @tracecoroutine
-def processDirectory(parentchk,parentname,info,temp):
+def processDirectory(info,path):
     doc = BeautifulSoup(directoryTemplate)
     presentInfo(doc,doc.find(id='info'),info)
     entries = doc.find(id='entries')
@@ -60,9 +60,9 @@ def processDirectory(parentchk,parentname,info,temp):
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
         a = doc.new_tag('a')
-        a['href'] = buildLink('/dir'+parentchk[goofs+4:],oj(parentname,name),info)
-        a['title'] = chk # don't go to this, since we want to remember our parent directory
-        a.append(chk[goofs+5:goofs+5+8].upper())
+        a['href'] = name # relative links woo
+        a['id'] = chk # don't go to this, since we want to remember our parent directory
+        a.append(name+'['+chk[goofs+5:goofs+5+8]+']')
         td.append(a)
         entry.append(td)
         td = doc.new_tag('td')
@@ -75,7 +75,7 @@ def processDirectory(parentchk,parentname,info,temp):
         entry.append(td)
         entries.append(entry)
     note.yellow('adding entries')
-    yield gnunet.directory(temp.name,addEntry)
+    yield gnunet.directory(path,addEntry)
     raise Return(doc)
 
 class Handler(baseserver.Handler):
@@ -89,62 +89,40 @@ class Handler(baseserver.Handler):
         yield self.end_headers()
         yield self.write(blob)
         note('wrote blob',type)
-    isdir = False
-    def handleSKS(self):
-        # keep the search URL for directories (and subdirectories) instead of 
-        # redirecting.
-    def handleDIR(self):
-        self.isdir = True
-        return self.handleCHK()
-    def startDownload(self,chk,name,info):
-        note.magenta('starting to download',chk[goofs:goofs+8],name)
-        if self.isdir:
-            type = True
-            # don't need this to go to the next in the pipeline!
-            del self.isdir 
-        else:
-            type = info.get('mimetype')
-        modification = calendar.timegm(info['publication date'])
-        return self.download(chk,name,info,type,modification)
     @tracecoroutine
     def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
         note.yellow('type',type,bold=True)
         if type is True or type == 'application/gnunet-directory':
-            # XXX: if the sub-entry, is a subdirectory, switch to that for a chk?
-            try:
-                name,sub = name.split('/',1)
-            except ValueError:
-                sub = None
-            if sub:
-                note.yellow('sub-entry here',sub,bold=True)
-                # getting a directory entry here...
-                # note if this is a directory entry then info['mimetype'] is correct for it
-                # but we still need the chk of it, so...
+            if self.filename:
+                note.yellow('sub-entry here',self.filename,bold=True)
+                # now find the chk/info of the filename in this directory
                 gotit = False
                 def oneResult(chk,name,info):
                     note.blue('name',name,chk,info,bold=True)
                     nonlocal gotit
-                    if name == sub:
-                        # sigh...
-                        #self.send_status(302,'over here')
-                        #self.send_header('Location',buildLink(chk[goofs:],name,info))
-                        #self.end_headers()
+                    if name == self.filename:
                         gotit = (chk,name,info)
                         return True
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
                     chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
-                        yield self.redirect('/dir'+chk[goofs+4:]+'/')
+                        # going down....
+                        old = (self.filename,self.subsequent)
+                        if self.subsequent:
+                            self.filename = self.subsequent.pop(0)
+                        else:
+                            self.filename = None
                     else:
-                        # can't redirect to these since we need to allow relative links!
-                        yield self.startDownload(chk,name,info)
+                        assert not self.subsequent, "No subdirs below a normal file!"
+                    yield self.startDownload(chk,name,info)
                 else:
+                    # a filename not in this directory.
                     self.write("Oh a wise guy, eh?")
                 return
-            # the directory itself, no sub-entry
-            doc = yield processDirectory(chk,name,info,temp)
+            # the directory itself, no sub-entry filename
+            doc = yield self.processDirectory(info,temp.name)
             del temp
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         elif type == 'text/html':

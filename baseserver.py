@@ -49,8 +49,8 @@ class Handler(myserver.ResponseHandler):
         self.keyword,self.filename = tail.split('/',1)
         if '/' in self.filename:
             # if a directory entry is itself a directory, this saves the sub-directory sub-part for it
-            # otherwise self.subsequent is ignored
-            self.filename,self.subsequent = self.filename.split('/',1)
+            # otherwise self.subsequent existing should be an error (since it messes up relative links)
+            self.filename,*self.subsequent = self.filename.split('/')
         # get the CHK for this SKS (the most recent one ofc)
         results = yield gnunet.search('gnunet://fs/sks/'+self.ident+'/'+self.keyword)
         results.sort(key=lambda result: result[-1]['publication date'])
