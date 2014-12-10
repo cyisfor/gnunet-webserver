@@ -84,7 +84,7 @@ def watchSearch(kw,inp):
 def directory(path,examine=None):
     if not examine:
         results = []
-    diract,done = start('directory',temp.name,stdout=STREAM)
+    diract,done = start('directory',path,stdout=STREAM)
     getting = False
     chk = None
     while True:
@@ -113,7 +113,10 @@ def directory(path,examine=None):
                 chk = None
     yield done
     if not examine:
+        assert results
         raise Return(results)
+    else:
+        note('examining')
 
 @tracecoroutine
 def search2(kw,limit=None):
@@ -127,6 +130,7 @@ def search2(kw,limit=None):
     watchSearch(kw,action.stdout)
     yield done
     results = yield directory(temp.name)
+    assert results
     del temp
     # temp file will be deleted now (for search results), since no more references
     # results.sort(key=lambda result: result[1]['publication date']) do this later
@@ -162,8 +166,10 @@ def download2(chk, progress, type=None, modification=None):
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watchDownload(action.stdout,progress)
+    watchDownload(chk,action.stdout,progress)
+    note('downloadid')
     yield exited
+    note('got it')
     buf = bytearray(0x1000)
     if not type:
         type = derpmagic.guess_type(temp.fileno())[0]

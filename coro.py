@@ -11,13 +11,15 @@ def tracecoroutine(f):
         g = f(*a,**kw)
         thing = None
         try:
+            if not(hasattr(g,'send')):
+                note('nogen?',f)
+                return
             while True:
                 thing = g.send(thing)
                 try: thing = yield thing
                 except Exception as e:
-                    note('passing down',type(e))
+                    note('ex down',type(e))
                     thing = g.throw(e)
-                    note('passed down')
         except StopIteration: pass
         except gen.Return as e: 
             note('yay returning',e)

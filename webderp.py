@@ -1,7 +1,13 @@
 import baseserver
+import myserver
 import gnunet
 
+from coro import tracecoroutine
+
+from tornado import ioloop
 from bs4 import BeautifulSoup
+
+import os
 
 directoryTemplate = '''<!DOCTYPE html><html>
 <head>
@@ -47,8 +53,6 @@ def processDirectory(chk,info,temp):
     yield gnunet.directory(temp,addEntry)
     raise Return(doc)
 
-@tracecoroutine
-
 class Handler(baseserver.Handler):
     @tracecoroutine
     def sendblob(self,blob,type):
@@ -56,6 +60,7 @@ class Handler(baseserver.Handler):
         yield self.set_length(len(doc))
         yield self.end_headers()
         yield self.write(doc)
+        note('wrote blob',type)
     @tracecoroutine
     def sendfile(self,info,temp,type,length):
         if type == 'application/gnunet-directory':
@@ -67,16 +72,14 @@ class Handler(baseserver.Handler):
             sanehtml.sanitize(doc)
             yield self.sendblob(str(doc).encode('utf-8'),'text/html')
         elif type == 'text/css':
-            assert(length < 0x10000)
+            assert length < 0x10000
             contents = sanecss.sanitize(temp.read(length))
             del temp
             yield self.sendblob(contents.encode('utf-8'),'text/css')
-        elif 'javascript' in type:
-            yield self.sendblob(b'alert("You got duped into using javascript, ha!");',type)
-
-
-            
-
+        elif type == 'application/x-shockwave-flash' and self.noflash:
+            yield self.set_length(0)
+        else:
+            yield super().sendfile(info,temp,type,length)
 
 Handler.default = os.environ['root']
 if Handler.default.startswith('gnunet://fs'):
