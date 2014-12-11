@@ -56,92 +56,6 @@ def start(op,*args,**kw):
     action.set_exit_callback(done.set_result)
     return action, done
 
-class Cache(dict):
-    maxCache = 0x200
-    def __init__(self,factory,maxCache=None):
-        self.queue = []
-        self.factory = factory
-        if maxCache:
-            self.maxCache = maxCache
-        super().__init__()
-    def add(self,key,finished,*a):
-        value = self.factory(finished,*a)
-        while len(self.queue) > self.maxCache:
-            del self[self.queue.pop(0)]
-        self[key] = value
-        self.queue.append(key)
-        return finished
-    def remove(self,key):
-        try: self.queue.remove(key)
-        except ValueError: return
-        del self[key]
-
-def cancellable(entries):
-    class Cancellable:
-        __slots__ = tuple(entries.keys())+('action',)
-        def cancel(self):
-            self.action.terminate()
-            self.action.stdout.close()
-
-class SearchProgress(makeobj({
-    'finished': None,
-    'action': None
-    'amount': 0})):
-    __slots__ = super(SearchProgress).__slots__
-    def watch(self,action):
-        self.action = action
-        return action.stdout.read_until_close(callback=lambda *a: None,
-                streaming_callback=partial(self.streaming,action))
-    def streaming(self,action,chunk):
-        search = searches.get(kw)
-        if not search or search is not me: 
-            note.magenta('search over for',kw)
-            action.terminate()
-            action.stdout.close()
-            return
-        note.magenta('search chunk',chunk)
-        search.amount += len(chunk)
-
-class DownloadProgress(makeobj({
-    'finished': None,
-    'action': None,
-    'current': 0,
-    'total': 1,
-    'remaining': 0,
-    'rate': 0,
-    'unit': None,
-    'lastblock': None})):
-    __slots__ = super(DownloadProgress).__slots__
-    def cancel(self):
-        self.action.terminate()
-        self.action.stdout.close()
-    @tracecoroutine
-    def watch(self,action):
-        self.action = action
-        while True:
-            try: line = yield action.stdout.read_until(b'\n')
-            except StreamClosedError: break
-            match = dw.match(line.decode('utf-8'))
-            if match:
-                for i,v in enumerate(match.groups()):
-                    self[i+1] = v
-                if self.progress: 
-                    # TODO: some kind of abortion support?
-                    self.progress()
-    progress = None
-
-
-
-
-dw = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
-
-searches = Cache(SearchProgress,0x800)
-
-# does not necessarily keep open files, but may accumulate lots of temp files on disk
-# ( all should be deleted on program close )
-# ( see nanny / mytemp for details )
-downloads = Cache(DownloadProgress,0x200) 
-
 embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
 @tracecoroutine
@@ -192,6 +106,84 @@ def directory(path,examine=None):
     else:
         note('examining')
 
+class Cache(dict):
+    maxCache = 0x200
+    def __init__(self,maxCache=None):
+        self.queue = []
+        if maxCache:
+            self.maxCache = maxCache
+        super().__init__()
+    def add(self,key,value):
+        while len(self.queue) > self.maxCache:
+            del self[self.queue.pop(0)]
+        self[key] = value
+        self.queue.append(key)
+        return finished
+    def remove(self,key):
+        try: self.queue.remove(key).cancel()
+        except ValueError: return
+        del self[key]
+
+def cancellable(entries):
+    entries['action'] = None
+    entries['terminated'] = False
+    class Cancellable(makeobj(entries)):
+        __slots__ = super(Cancellable).__slots__
+        def cancel(self):
+            self.action.terminate()
+            self.action.stdout.close()
+        def watch(self,action):
+            self.action = action
+    return Cancellable
+
+def finishable(entries):
+    entries['finished'] = None
+    class Finishable(cancellable(entries)):
+        __slots__ = super(Finishable).__slots__
+    return finishable
+
+class SearchProgress(cancellable({
+    'amount': 0})):
+    __slots__ = super(SearchProgress).__slots__
+    def watch(self,action):
+        super().watch(action)
+        return action.stdout.read_until_close(callback=lambda *a: None,
+                streaming_callback=partial(self.streaming,action))
+    def streaming(self,action,chunk):
+        note.magenta('search chunk',chunk)
+        self.amount += len(chunk)
+
+class DownloadProgress(finishable({
+    'current': 0,
+    'total': 1,
+    'remaining': 0,
+    'rate': 0,
+    'unit': None,
+    'lastblock': None})):
+    __slots__ = super(DownloadProgress).__slots__
+    @tracecoroutine
+    def watch(self,action):
+        super().watch(action)
+        while True:
+            try: line = yield action.stdout.read_until(b'\n')
+            except StreamClosedError: break
+            match = dw.match(line.decode('utf-8'))
+            if match:
+                for i,v in enumerate(match.groups()):
+                    self[i+1] = v
+                if self.progress: 
+                    self.progress()
+    progress = None
+
+dw = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
+
+searches = Cache(0x800)
+
+# does not necessarily keep open files, but may accumulate lots of temp files on disk
+# ( all should be deleted on program close )
+# ( see nanny / mytemp for details )
+downloads = Cache(0x200)
+
 @tracecoroutine
 def search2(kw,limit=None):
     if limit:
@@ -211,12 +203,20 @@ def search2(kw,limit=None):
     # results.sort(key=lambda result: result[1]['publication date']) do this later
     raise Return(results)
 
+def addthingy(cache,key,finished,thingy):
+    thingy.finished = finished
+    cache[key] = thingy
+    return thingy
+
 def search(kw,limit=None):
     search = searches.get(kw)
     if search:
         note('already searcho',search.finished._result is not None)
         return search.finished
-    return searches.add(kw,search2(kw,limit),0)
+    search = SearchProgress()
+    searches[kw] = search
+    search.finished = search2(kw,search,limit)
+    return search
 
 @tracecoroutine
 def download2(chk, progress, type=None, modification=None):
