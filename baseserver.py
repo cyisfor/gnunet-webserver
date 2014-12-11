@@ -35,33 +35,53 @@ class Handler(myserver.ResponseHandler):
         else:
             self.kind,self.rest = self.path[1:].split('/',1)
             return getattr(self,'handle'+self.kind.upper())()
+    def parseMeta(self, path):
+        try: path, query = path.split('?',1)
+        except ValueError:
+            return path, {}
+        info = dict((n,gnunet.decode(n,v)) for n,v in ((unquote(n),unquote(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
+        for n,long in self.queryShortcuts:
+            if n in info:
+                info[long] = info[n]
+                del info[n]
+        return path,info
+    isDir = False
+    def breakdown(self,rest):
+        "Extract meaningful info we need from the URL"
+        # /sks/ident/keyword/filepathtail?metadata
+        # /chk/ident/filepath?metadata
+        
+        # for sks, keyword must be parsed out, but filepath = keyword/filepathtail (or just keyword)
+        # sks search = /sks/ident/keyword, sks filepath = keyword/filepathtail sigh
+
+        # '/' in filepath implies directory
+        # mimetype=application/gnunet-directory redirects to add '/' if not already isDir
+        # ...because relative links screwed up if not end in '/'
+        self.ident,tail = rest.split('/',1)
+        self.filepath,meta = self.parseMeta(tail)
+        if '/' in self.filepath:
+            self.isDir = True
+        # check for mimetype directory later since SSK can add it
+        return meta
+    def handleSKS(self,rest):
+        # /sks/ident/keyword/filepathtail
+        # with just keyword, these could be files
+        # the directory is the chk result NOT the search itself.
+        # filepath = keyword/filepathtail so same rules as CHK
+        self.keyword = self.filepath.split('/',1)[0]
+        try: return self.startDownload(*sksCache[(self.ident,self.keyword)])
+        except KeyError: pass
+    
+        return self.lookup()
     @tracecoroutine
-    def redirect(self,location):
-        yield self.send_status('302','boink')
-        yield self.send_header('Location',location)
-        yield self.end_headers()
-    @tracecoroutine
-    def handleSKS(self):
-        self.ident,tail = self.rest.split('/',1)
-        if not '/' in tail:
-            # /sks/ident/keyword/filename
-            # with just keyword, these are always directories
-            # URLs for directories must end in / on the CLIENT side
-            # ...for relative links to work right.
-            yield self.redirect(self.path+'/')
-            return
-        self.keyword,self.filename = tail.split('/',1)
-        if '/' in self.filename:
-            # if a directory entry is itself a directory, this saves the sub-directory sub-part for it
-            # otherwise self.subsequent existing should be an error (since it messes up relative links)
-            self.filename,*self.subsequent = self.filename.split('/')
+    def lookup(self):
         # get the CHK for this SKS (the most recent one ofc)
         results = yield gnunet.search('gnunet://fs/sks/'+self.ident+'/'+self.keyword)
         results.sort(key=lambda result: result[-1]['publication date'])
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]
-        result = yield self.startDownload(chk,name,info)
-        if result: raise Return(result)
+        chkCache[(self.ident,self.keyword)] = (chk,name,info)
+        raise Return(self.startDownload(chk,name,info))
     def cleanSKS(self,oldinfos):
         indexfiles = {}
         yield gnunet.indexed(lambda tinychk,name: operator.setitem(indexfiles,tinychk.decode(),name))
