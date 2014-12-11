@@ -1,5 +1,6 @@
 import gnunet
 import myserver
+from delaycache import DelayCache
 
 import note
 note.monitor(__name__)
@@ -21,6 +22,10 @@ import time
 def add_future(future,what):
     ioloop.IOLoop.instance().add_future(future,(lambda future: what(*future.result())))
     return future
+
+sksCache = {}
+
+expiryName = 'focal length 35mm' # libextractor sucks!
 
 class Handler(myserver.ResponseHandler):
     code = 200
@@ -69,10 +74,14 @@ class Handler(myserver.ResponseHandler):
         # the directory is the chk result NOT the search itself.
         # filepath = keyword/filepathtail so same rules as CHK
         self.keyword = self.filepath.split('/',1)[0]
-        try: return self.startDownload(*sksCache[(self.ident,self.keyword)])
+        try: 
+            chk, name, info, expires = sksCache[(self.ident,self.keyword)]
+            if expires < time.time():
+                return self.startDownload(chk,name,info)
         except KeyError: pass
     
         return self.lookup()
+    defaultExpiry = 600
     @tracecoroutine
     def lookup(self):
         # get the CHK for this SKS (the most recent one ofc)
@@ -80,7 +89,14 @@ class Handler(myserver.ResponseHandler):
         results.sort(key=lambda result: result[-1]['publication date'])
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]
-        chkCache[(self.ident,self.keyword)] = (chk,name,info)
+        expiry = info.get(expiryName)
+        if expiry:
+            try: expiry = float(expiry)
+            except ValueError:
+                expiry = self.defaultExpiry
+        else:
+            expiry = self.defaultExpiry
+        sksCache[(self.ident,self.keyword)] = (chk,name,info,time.time()+expiry)
         raise Return(self.startDownload(chk,name,info))
     def cleanSKS(self,oldinfos):
         indexfiles = {}

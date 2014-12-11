@@ -83,16 +83,17 @@ searches = Cache(SearchProgress,0x800)
 # ( see nanny / mytemp for details )
 downloads = Cache(DownloadProgress,0x200) 
 
-def watchSearch(kw,inp):
+def watchSearch(kw,action):
     def streaming(chunk):
         search = searches.get(kw)
         if not search: 
             note.magenta('search over for',kw)
-            inp.close()
+            action.terminate()
+            action.stdout.close()
             return
         note.magenta('search chunk',chunk)
         search.amount += len(chunk)
-    return inp.read_until_close(callback=lambda *a: None,streaming_callback=streaming)
+    return action.stdout.read_until_close(callback=lambda *a: None,streaming_callback=streaming)
 
 embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
@@ -171,15 +172,16 @@ def search(kw,limit=None):
     return searches.add(kw,search2(kw,limit),0)
 
 @tracecoroutine
-def watchDownload(chk,inp,progress=None):
+def watchDownload(chk,action,progress=None):
     while True:
-        try: line = yield inp.read_until(b'\n')
+        try: line = yield action.stdout.read_until(b'\n')
         except StreamClosedError: break
         match = dw.match(line.decode('utf-8'))
         if match:
             download = downloads.get(chk)
             if not download:
-                inp.close()
+                action.terminate()
+                action.stdout.close()
                 return
             for i,v in enumerate(match.groups()):
                 download[i+1] = v
@@ -193,7 +195,7 @@ def download2(chk, progress, type=None, modification=None):
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watchDownload(chk,action.stdout,progress)
+    watchDownload(chk,action,progress)
     note('downloadid')
     yield exited
     note('got it')
