@@ -38,8 +38,12 @@ class Handler(myserver.ResponseHandler):
         if self.path == '/':
             return self.redirect(self.default)
         else:
-            self.breakdown()
+            try: self.breakdown()
+            except ValueError:
+                return self.static()
             return getattr(self,'handle'+self.kind.upper())()
+    def static(self):
+        self.write('serve static stuff from where self.path is')
     def parseMeta(self, path):
         try: path, query = path.split('?',1)
         except ValueError:

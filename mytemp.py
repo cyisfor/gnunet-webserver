@@ -3,6 +3,7 @@ import pypysux
 import weakref
 import tempfile
 import os
+import time
 
 class ShenanigansTemporaryFile:
     "A temporary file that can be opened and closed, but only deletes itself with no refs, or atexit"
