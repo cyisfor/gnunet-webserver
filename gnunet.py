@@ -28,14 +28,12 @@ import sys
 
 STREAM = Subprocess.STREAM
 
-timeout = 1000000 # 1 second
-
 tmpdir = '/tmp/gnunet'
 try: os.mkdir(tmpdir)
 except OSError: pass
 
-def tempo(ident):
-    return nanny.watch(lambda: ShenanigansTemporaryFile(ident,dir=tmpdir))
+def tempo(ident,expires=None):
+    return nanny.watch(lambda: ShenanigansTemporaryFile(ident,dir=tmpdir,expires=expires))
 
 def decode(prop,value):
     if prop == 'publication date':
@@ -205,20 +203,25 @@ def cached(cache,Thingy,name):
     
 @cached(searches,SearchProgress,'searching')
 @tracecoroutine
-def search(watcher, kw,limit=None):
+def search(watcher, kw,limit=None,timeout=None):
     if limit:
         limit = ('--results',str(limit))
     else:
         limit = ()
+    if timeout is not None:
+        expires = timeout
+        timeout = ('--timeout',str(timeout))
     if kw.startswith('gnunet://fs/sks/'):
-        temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0])
+        temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=expires)
     else:
-        temp = tempo(kw.replace('%','%20').replace('/','%2f'))
-
-    action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
-    watcher.watch(action,done)
-    code = yield done
-    note.magenta('code',code)
+        temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=expires)
+    watcher.isExpired = temp.isExpired
+    if temp.new:
+        action,done = start(*("search",)+limit+timeout+("--output",temp.name,kw),stdout=STREAM)
+        watcher.watch(action,done)
+        code = yield done
+        temp.commit()
+        note.magenta('code',code)
     results = yield directory(temp.name)
     assert results, kw
     del temp
@@ -232,10 +235,12 @@ def download(watcher, chk, type=None, modification=None):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo(chk[len('gnunet://fs/chk/'):].split('/')[0])
-    action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watcher.watch(action,exited)
-    note('downloadid')
-    yield exited
+    if temp.new:
+        action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
+        watcher.watch(action,exited)
+        note('downloadid')
+        yield exited
+        temp.commit()
     note('got it')
     buf = bytearray(0x1000)
     if not type:
