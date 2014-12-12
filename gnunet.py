@@ -18,7 +18,7 @@ from tornado.gen import Return
 import subprocess as s
 
 import weakref
-from functools import partial
+from functools import partial,wraps
 import operator
 import traceback
 import time
@@ -149,21 +149,23 @@ class DownloadProgress(finishable({
     'rate': 0,
     'unit': None,
     'lastblock': None})):
+
+    pattern = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
     @tracecoroutine
     def watch(self,action):
         super().watch(action)
         while True:
             try: line = yield action.stdout.read_until(b'\n')
             except StreamClosedError: break
-            match = dw.match(line.decode('utf-8'))
+            match = self.pattern.match(line.decode('utf-8'))
             if match:
+                fields = ('current','total','remaining','rate','unit','lastblock') # SIGH
                 for i,v in enumerate(match.groups()):
-                    self[i+1] = v
+                    setattr(self,fields[i], v)
                 if self.progress: 
                     self.progress()
     progress = None
 
-dw = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
 
 searches = pylru.lrucache(0x800)
 
@@ -177,17 +179,18 @@ def cached(cache,Thingy,name):
         @wraps(f)
         def wrapper(key,*a,**kw):
             try:
-                result = cache.get(key)
-                if result.running():
+                result = cache[key]
+                if result.finished.running():
                     note.green('already',name)
                 else:
-                    note.green('redoing',name,result.result())
+                    note.green('redoing',name,result.finished.result())
             except KeyError:
                 note.green('starting',name,bold=True)
                 result = Thingy()
                 cache[key] = result
                 result.finished = f(result, key, *a, **kw)
-            return result
+            assert(result.finished)
+            return result.finished
         return wrapper
     return decorator
     
@@ -231,7 +234,9 @@ def download(watcher, chk, type=None, modification=None):
     note('lengthb',length)
     temp.seek(0,0)
     if modification:
-        os.utime(temp.fileno(),(modification,modification))
+        derp = (modification,modification)
+        note.yellow('mod',modification,len(derp))
+        os.utime(temp.fileno(),derp)
     # X-SendFile this baby
     # temp won't delete upon returning this, since not at 0 references
     raise Return((temp,type,length))
@@ -246,13 +251,6 @@ def indexed(take):
         tinychk,name = line.split(b':')
         take(tinychk,name.strip())
     yield done
-
-@tracecoroutine
-def downloadSSK(ssk):
-    results = yield search(ssk)
-    results.sort(key=lambda result: result[-1]['publication date'])
-    result = yield download(results[0][0])
-    raise Return(result)
 
 def unindex(path):
     action,done = start("unindex",path)

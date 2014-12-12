@@ -3,5 +3,5 @@ def makeobj(entries):
     class Object:
         def __init__(self):
             for n,v in entries.items():
-                setattr(n,v)
+                setattr(self,n,v)
     return Object

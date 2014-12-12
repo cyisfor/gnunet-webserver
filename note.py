@@ -86,8 +86,8 @@ if 'debug' in os.environ:
             else:
                 module = '__main__'
             modules.add(module)
-    sys.modules[__name__] = NoteModule()
 else:
-    def note(*s): pass
-    def monitor(mod=None): pass
-    def alarm(*s): pass
+    class NoteModule:
+        def __getattr__(self,n):
+            return lambda *a, **kw: None
+sys.modules[__name__] = NoteModule()

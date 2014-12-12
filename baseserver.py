@@ -51,7 +51,7 @@ class Handler(myserver.ResponseHandler):
                 del info[n]
         return path,info
     isDir = False
-    def breakdown(self,rest):
+    def breakdown(self):
         "Extract meaningful info we need from the URL"
         # /sks/ident/keyword/filepathtail?metadata
         # /chk/ident/filepath?metadata
@@ -70,13 +70,13 @@ class Handler(myserver.ResponseHandler):
             self.isDir = True
         # check for mimetype directory later not now since SKS can add it
     oldCHK = None
-    def handleSKS(self,rest):
+    def handleSKS(self):
         # /sks/ident/keyword/filepathtail
         # with just keyword, these could be files
         # the directory is the chk result NOT the search itself.
         # filepath = keyword/filepathtail so same rules as CHK
         self.keyword = self.filepath.split('/',1)[0]
-        self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword)
+        self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword
         try: 
             chk, name, info, expires = sksCache[(self.ident,self.keyword)]
             if expires >= time.time():
@@ -145,7 +145,6 @@ class Handler(myserver.ResponseHandler):
         # how to "expire" downloads requested by CHK? Just wait for the cache to overflow, eh.
         info.setdefault('publication date',time.gmtime())
         return self.startDownload(chk,name,info)
-    progress = None
     def startDownload(self,chk,name,info):
         "override this to do stuff if you don't care what the file type or publication date is"
         self.meta.update(info) # this seems a weird place to update this.
@@ -153,15 +152,14 @@ class Handler(myserver.ResponseHandler):
         modification = calendar.timegm(info['publication date'])
         return self.download(chk,name,self.meta,type,modification)
     @tracecoroutine
-    def download(self,chk,name,info,type,modification,progress=None):
+    def download(self,chk,name,info,type,modification):
         "augment this to setup stuff according to the file type, HTML filters etc"
-        # and by augment I mean override it, then call it w/ progress.
 
         # in here you handle the type and modification 
         # instead of re-parsing them out of the info
         # is this too much granularity?
 
-        temp,type,length = yield gnunet.download(chk,progress,type,modification)
+        temp,type,length = yield gnunet.download(chk,type,modification)
         # and now we have the best hope to know the type
         if not self.isDir and type == 'application/gnunet-directory':
             raise Redirect(self.path+'/')
