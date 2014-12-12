@@ -120,6 +120,7 @@ class Cache(dict):
         self.queue.append(key)
         return finished
     def remove(self,key):
+        # assumes values have a cancel method
         try: self.queue.remove(key).cancel()
         except ValueError: return
         del self[key]
@@ -142,7 +143,7 @@ def finishable(entries):
         __slots__ = super(Finishable).__slots__
     return finishable
 
-class SearchProgress(cancellable({
+class SearchProgress(finishable({
     'amount': 0})):
     __slots__ = super(SearchProgress).__slots__
     def watch(self,action):
@@ -185,7 +186,7 @@ searches = Cache(0x800)
 downloads = Cache(0x200)
 
 @tracecoroutine
-def search2(kw,limit=None):
+def search2(watcher, kw,limit=None):
     if limit:
         limit = ('--results',str(limit))
     else:
@@ -193,7 +194,7 @@ def search2(kw,limit=None):
     temp = tempo()
 
     action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
-    watchSearch(kw,action.stdout)
+    watcher.watch(action)
     code = yield done
     note.magenta('code',code)
     results = yield directory(temp.name)
@@ -203,9 +204,10 @@ def search2(kw,limit=None):
     # results.sort(key=lambda result: result[1]['publication date']) do this later
     raise Return(results)
 
-def addthingy(cache,key,finished,thingy):
-    thingy.finished = finished
-    cache[key] = thingy
+def addthingy(cache,key,Thingy,op,*a,**kw):
+    thingy = Thingy()
+    cache[kw] = thingy
+    thingy.finished = op(thingy,*a,**kw)
     return thingy
 
 def search(kw,limit=None):
@@ -213,18 +215,15 @@ def search(kw,limit=None):
     if search:
         note('already searcho',search.finished._result is not None)
         return search.finished
-    search = SearchProgress()
-    searches[kw] = search
-    search.finished = search2(kw,search,limit)
-    return search
+    return addthingy(searches,kw,SearchProgress,search2,kw,limit)
 
 @tracecoroutine
-def download2(chk, progress, type=None, modification=None):
+def download2(watcher, chk, type, modification):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watchDownload(chk,action,progress)
+    watcher.watch(action)
     note('downloadid')
     yield exited
     note('got it')
@@ -247,8 +246,7 @@ def download(chk,progress=None, type=None, modification=None):
     if download:
         note('already downloading',download.finished._result)
         return download.finished
-    watcher = downloads.add(chk,None,0,None)
-    watcher.finished = download2(chk,watcher,type,modification)
+    return addthingy(downloads,chk,DownloadProgress,download2,chk,type,modification)
 
 @tracecoroutine
 def indexed(take):

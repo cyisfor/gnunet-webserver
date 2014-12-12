@@ -38,7 +38,7 @@ class Handler(myserver.ResponseHandler):
         if self.path == '/':
             return self.redirect(self.default)
         else:
-            self.kind,self.rest = self.path[1:].split('/',1)
+            self.breakdown()
             return getattr(self,'handle'+self.kind.upper())()
     def parseMeta(self, path):
         try: path, query = path.split('?',1)
@@ -62,33 +62,44 @@ class Handler(myserver.ResponseHandler):
         # '/' in filepath implies directory
         # mimetype=application/gnunet-directory redirects to add '/' if not already isDir
         # ...because relative links screwed up if not end in '/'
+
+        self.kind,rest = self.path[1:].split('/',1)
         self.ident,tail = rest.split('/',1)
-        self.filepath,meta = self.parseMeta(tail)
+        self.filepath,self.meta = self.parseMeta(tail)
         if '/' in self.filepath:
             self.isDir = True
-        # check for mimetype directory later since SSK can add it
-        return meta
+        # check for mimetype directory later not now since SKS can add it
+    oldCHK = None
     def handleSKS(self,rest):
         # /sks/ident/keyword/filepathtail
         # with just keyword, these could be files
         # the directory is the chk result NOT the search itself.
         # filepath = keyword/filepathtail so same rules as CHK
         self.keyword = self.filepath.split('/',1)[0]
+        self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword)
         try: 
             chk, name, info, expires = sksCache[(self.ident,self.keyword)]
-            if expires < time.time():
+            if expires >= time.time():
+                # XXX: is this the best way to do this?
+                gnunet.searches.remove(self.uri)
                 return self.startDownload(chk,name,info)
+            else:
+                self.oldCHK = chk # don't remove this YET 
+                # not until the search confirms it's gone
         except KeyError: pass
-    
         return self.lookup()
     defaultExpiry = 600
     @tracecoroutine
     def lookup(self):
         # get the CHK for this SKS (the most recent one ofc)
-        results = yield gnunet.search('gnunet://fs/sks/'+self.ident+'/'+self.keyword)
+        results = yield gnunet.search(self.uri)
         results.sort(key=lambda result: result[-1]['publication date'])
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]
+        if self.oldCHK and self.oldCHK != chk:
+            # did a previous search expire that we need to confirm changed?
+            gnunet.downloads.remove(self.oldCHK)
+            self.oldCHK = None
         expiry = info.get(expiryName)
         if expiry:
             try: expiry = float(expiry)
@@ -130,14 +141,17 @@ class Handler(myserver.ResponseHandler):
         except ValueError:
             name = None
         chk = 'gnunet://fs/chk/' + self.ident
+        # should we check if self.oldCHK is here, and set it to None if it matches?
+        # how to "expire" downloads requested by CHK? Just wait for the cache to overflow, eh.
         info.setdefault('publication date',time.gmtime())
         return self.startDownload(chk,name,info)
     progress = None
     def startDownload(self,chk,name,info):
         "override this to do stuff if you don't care what the file type or publication date is"
-        type = info.get('mimetype')
+        self.meta.update(info) # this seems a weird place to update this.
+        type = self.meta.get('mimetype')
         modification = calendar.timegm(info['publication date'])
-        return self.download(chk,name,info,type,modification)
+        return self.download(chk,name,self.meta,type,modification)
     @tracecoroutine
     def download(self,chk,name,info,type,modification,progress=None):
         "augment this to setup stuff according to the file type, HTML filters etc"
@@ -148,6 +162,10 @@ class Handler(myserver.ResponseHandler):
         # is this too much granularity?
 
         temp,type,length = yield gnunet.download(chk,progress,type,modification)
+        # and now we have the best hope to know the type
+        if not self.isDir and type == 'application/gnunet-directory':
+            raise Redirect(self.path+'/')
+
         result = yield self.sendfile(chk,name,info,temp,type,length)
         raise Return(result)
     @tracecoroutine
