@@ -30,8 +30,12 @@ STREAM = Subprocess.STREAM
 
 timeout = 1000000 # 1 second
 
-def tempo():
-    return nanny.watch(ShenanigansTemporaryFile)
+tmpdir = '/tmp/gnunet'
+try: os.mkdir(tmpdir)
+except OSError: pass
+
+def tempo(ident):
+    return nanny.watch(ShenanigansTemporaryFile(ident,dir=tmpdir))
 
 def decode(prop,value):
     if prop == 'publication date':
@@ -205,7 +209,10 @@ def search(watcher, kw,limit=None):
         limit = ('--results',str(limit))
     else:
         limit = ()
-    temp = tempo()
+    if kw.startswith('gnunet://fs/sks/'):
+        temp = tempo(kw[len('gnunet://fs/sks/')].split('/')[0])
+    else:
+        temp = tempo(kw.replace('%','%20').replace('/','%2f'))
 
     action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
     watcher.watch(action,done)
@@ -223,7 +230,7 @@ def search(watcher, kw,limit=None):
 def download(watcher, chk, type=None, modification=None):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
-    temp = tempo()
+    temp = tempo(chk[len('gnunet://fs/chk/')].split('/')[0])
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
     watcher.watch(action,exited)
     note('downloadid')

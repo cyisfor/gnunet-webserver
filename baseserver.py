@@ -31,7 +31,7 @@ class Handler(myserver.ResponseHandler):
     code = 200
     message = "Otay"
     subsequent = None
-    filename = None
+    filepath = None
     keyword = None
     ident = None
     def get(self):
@@ -75,10 +75,13 @@ class Handler(myserver.ResponseHandler):
         # with just keyword, these could be files
         # the directory is the chk result NOT the search itself.
         # filepath = keyword/filepathtail so same rules as CHK
-        self.keyword = self.filepath.split('/',1)[0]
+        try: self.keyword,self.filepath = self.filepath.split('/',1)
+        except ValueError:
+            self.keyword = self.filepath
+            self.filepath = None
         self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword
         try: 
-            chk, name, info, expires = sksCache[(self.ident,self.filepath)]
+            chk, name, info, expires = sksCache[(self.ident,self.keyword,self.filepath)]
             if expires >= time.time():
                 # XXX: is this the best way to do this?
                 try: del gnunet.searches[self.uri]
@@ -110,7 +113,7 @@ class Handler(myserver.ResponseHandler):
                 expiry = self.defaultExpiry
         else:
             expiry = self.defaultExpiry
-        sksCache[(self.ident,self.filepath)] = (chk,name,info,time.time()+expiry)
+        sksCache[(self.ident,self.keyword,self.filepath)] = (chk,name,info,time.time()+expiry)
         raise Return(self.startDownload(chk,name,info))
     def cleanSKS(self,oldinfos):
         indexfiles = {}

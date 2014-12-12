@@ -119,7 +119,7 @@ class Handler(baseserver.Handler):
                     raise Return(self.startDownload(chk,name,info))
                 else:
                     # a filename not in this directory.
-                    self.write("Oh a wise guy, eh?")
+                    self.write("Oh a wise guy, eh? "+repr(self.filepath))
                 return
             # the directory itself, no sub-entry filename
             doc = yield processDirectory(info,temp.name)

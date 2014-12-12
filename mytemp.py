@@ -6,8 +6,13 @@ import os
 
 class ShenanigansTemporaryFile:
     "A temporary file that can be opened and closed, but only deletes itself with no refs, or atexit"
-    def __init__(self,dir='/tmp',text=False,encoding=None):
-        fd,path = tempfile.mkstemp(dir=dir,text=False)
+    def __init__(self,name=None,dir='/tmp',text=False,encoding=None):
+        if name is None:
+            fd,path = tempfile.mkstemp(suffix='.tmp',dir=dir,text=False)
+        else:
+            path = os.path.join(dir,name+'.tmp')
+            encoding = encoding if encoding else 'utf-8' if text else None
+            fd = open(path,'w',encoding=encoding)
         self.name = path
         self.raw = os.fdopen(fd,'w+b')
         if encoding:
@@ -17,6 +22,20 @@ class ShenanigansTemporaryFile:
         else:
             self.file = self.raw
         weakref.finalize(self, os.unlink, path)
+    def commit(self):
+        # assumes not a tempfile...
+        path = self.name[:-4]
+        old = path+'.old'
+        try: os.rename(path,old)
+        except OSError: pass
+        try:
+            os.rename(self.name,path)
+            self.name = path
+        except:
+            if os.path.exists(old):
+                try: os.unlink(path)
+                except OSError: pass
+                os.rename(old,path)
     def __getattr__(self,name):
         attr = getattr(self.file,name)
         setattr(self,name,attr)
