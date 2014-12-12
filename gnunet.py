@@ -3,6 +3,8 @@ import nanny
 from mytemp import ShenanigansTemporaryFile
 from coro import tracecoroutine
 
+import pylru
+
 import note
 note.monitor(__name__)
 
@@ -15,6 +17,7 @@ from tornado.gen import Return
 
 import subprocess as s
 
+import weakref
 from functools import partial
 import operator
 import traceback
@@ -106,46 +109,31 @@ def directory(path,examine=None):
     else:
         note('examining')
 
-class Cache(dict):
-    maxCache = 0x200
-    def __init__(self,maxCache=None):
-        self.queue = []
-        if maxCache:
-            self.maxCache = maxCache
-        super().__init__()
-    def add(self,key,value):
-        while len(self.queue) > self.maxCache:
-            del self[self.queue.pop(0)]
-        self[key] = value
-        self.queue.append(key)
-        return finished
-    def remove(self,key):
-        # assumes values have a cancel method
-        try: self.queue.remove(key).cancel()
-        except ValueError: return
-        del self[key]
-
 def cancellable(entries):
-    entries['action'] = None
-    entries['terminated'] = False
     class Cancellable(makeobj(entries)):
-        __slots__ = super(Cancellable).__slots__
+        action = None
+        cancelled = True # starts out needing finalizing?
+        def __init__(self):
+            super().__init__()
         def cancel(self):
+            if self.cancelled: return
+            self.cancelled = True
             self.action.terminate()
             self.action.stdout.close()
         def watch(self,action):
             self.action = action
+            if self.cancelled:
+                weakref.finalize(self,self.cancel)
+                self.cancelled = False
     return Cancellable
 
 def finishable(entries):
-    entries['finished'] = None
     class Finishable(cancellable(entries)):
-        __slots__ = super(Finishable).__slots__
-    return finishable
+        finished = None
+    return Finishable
 
 class SearchProgress(finishable({
     'amount': 0})):
-    __slots__ = super(SearchProgress).__slots__
     def watch(self,action):
         super().watch(action)
         return action.stdout.read_until_close(callback=lambda *a: None,
@@ -161,7 +149,6 @@ class DownloadProgress(finishable({
     'rate': 0,
     'unit': None,
     'lastblock': None})):
-    __slots__ = super(DownloadProgress).__slots__
     @tracecoroutine
     def watch(self,action):
         super().watch(action)
@@ -178,15 +165,35 @@ class DownloadProgress(finishable({
 
 dw = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
 
-searches = Cache(0x800)
+searches = pylru.lrucache(0x800)
 
 # does not necessarily keep open files, but may accumulate lots of temp files on disk
 # ( all should be deleted on program close )
 # ( see nanny / mytemp for details )
-downloads = Cache(0x200)
+downloads = pylru.lrucache(0x200)
 
+def cached(cache,Thingy,name):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(key,*a,**kw):
+            try:
+                result = cache.get(key)
+                if result.running():
+                    note.green('already',name)
+                else:
+                    note.green('redoing',name,result.result())
+            except KeyError:
+                note.green('starting',name,bold=True)
+                result = Thingy()
+                cache[key] = result
+                result.finished = f(result, key, *a, **kw)
+            return result
+        return wrapper
+    return decorator
+    
+@cached(searches,SearchProgress,'searching')
 @tracecoroutine
-def search2(watcher, kw,limit=None):
+def search(watcher, kw,limit=None):
     if limit:
         limit = ('--results',str(limit))
     else:
@@ -204,21 +211,9 @@ def search2(watcher, kw,limit=None):
     # results.sort(key=lambda result: result[1]['publication date']) do this later
     raise Return(results)
 
-def addthingy(cache,key,Thingy,op,*a,**kw):
-    thingy = Thingy()
-    cache[kw] = thingy
-    thingy.finished = op(thingy,*a,**kw)
-    return thingy
-
-def search(kw,limit=None):
-    search = searches.get(kw)
-    if search:
-        note('already searcho',search.finished._result is not None)
-        return search.finished
-    return addthingy(searches,kw,SearchProgress,search2,kw,limit)
-
+@cached(downloads,DownloadProgress,'downloading')
 @tracecoroutine
-def download2(watcher, chk, type, modification):
+def download(watcher, chk, type=None, modification=None):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
@@ -240,13 +235,6 @@ def download2(watcher, chk, type, modification):
     # X-SendFile this baby
     # temp won't delete upon returning this, since not at 0 references
     raise Return((temp,type,length))
-
-def download(chk,progress=None, type=None, modification=None):
-    download = downloads.get(chk)
-    if download:
-        note('already downloading',download.finished._result)
-        return download.finished
-    return addthingy(downloads,chk,DownloadProgress,download2,chk,type,modification)
 
 @tracecoroutine
 def indexed(take):

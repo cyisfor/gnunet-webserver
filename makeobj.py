@@ -1,10 +1,7 @@
+# meh, slots are slower, not worth size cut
 def makeobj(entries):
-    slots,defaults = zip(*entries.items())
     class Object:
-        __slots__ = slots
         def __init__(self):
-            for i,v in enumerate(defaults):
-                setattr(self,slots[i],v)
-        def __setitem__(self,i,v):
-            setattr(self,slots[i],v)
+            for n,v in entries.items():
+                setattr(n,v)
     return Object
