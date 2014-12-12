@@ -94,15 +94,15 @@ class Handler(baseserver.Handler):
     def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
         note.yellow('type',type,bold=True)
-        if type is True or type == 'application/gnunet-directory':
-            if self.filename:
-                note.yellow('sub-entry here',self.filename,bold=True)
+        if self.isDir:
+            if len(self.filepath) > 0:
+                note.yellow('sub-entry here',self.filepath,bold=True)
                 # now find the chk/info of the filename in this directory
                 gotit = False
                 def oneResult(chk,name,info):
                     note.blue('name',name,chk,info,bold=True)
                     nonlocal gotit
-                    if name == self.filename:
+                    if name == self.filepath:
                         gotit = (chk,name,info)
                         return True
                 yield gnunet.directory(temp.name,oneResult)
@@ -110,9 +110,9 @@ class Handler(baseserver.Handler):
                     chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
                         if self.subsequent:
-                            self.filename = self.subsequent.pop(0)
+                            self.filepath = self.subsequent.pop(0)
                         else:
-                            self.filename = None
+                            self.filepath = None
                     else:
                         assert not self.subsequent, "No subdirs below a normal file!"
                     # going down....

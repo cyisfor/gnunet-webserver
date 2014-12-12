@@ -118,10 +118,13 @@ def cancellable(entries):
         def cancel(self):
             if self.cancelled: return
             self.cancelled = True
-            self.action.terminate()
+            self.action.proc.terminate()
             self.action.stdout.close()
-        def watch(self,action):
+        def nocancel(self, future):
+            self.cancelled = True
+        def watch(self,action,done):
             self.action = action
+            ioloop.IOLoop.instance().add_future(done,self.nocancel)
             if self.cancelled:
                 weakref.finalize(self,self.cancel)
                 self.cancelled = False
@@ -134,8 +137,8 @@ def finishable(entries):
 
 class SearchProgress(finishable({
     'amount': 0})):
-    def watch(self,action):
-        super().watch(action)
+    def watch(self,action,done):
+        super().watch(action,done)
         return action.stdout.read_until_close(callback=lambda *a: None,
                 streaming_callback=partial(self.streaming,action))
     def streaming(self,action,chunk):
@@ -152,8 +155,8 @@ class DownloadProgress(finishable({
 
     pattern = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
     @tracecoroutine
-    def watch(self,action):
-        super().watch(action)
+    def watch(self,action,done):
+        super().watch(action,done)
         while True:
             try: line = yield action.stdout.read_until(b'\n')
             except StreamClosedError: break
@@ -184,11 +187,12 @@ def cached(cache,Thingy,name):
                     note.green('already',name)
                 else:
                     note.green('redoing',name,result.finished.result())
-            except KeyError:
-                note.green('starting',name,bold=True)
-                result = Thingy()
-                cache[key] = result
-                result.finished = f(result, key, *a, **kw)
+                return result.finished
+            except KeyError: pass
+            note.green('starting',name,bold=True)
+            result = Thingy()
+            cache[key] = result
+            result.finished = f(result, key, *a, **kw)
             assert(result.finished)
             return result.finished
         return wrapper
@@ -204,7 +208,7 @@ def search(watcher, kw,limit=None):
     temp = tempo()
 
     action,done = start(*("search",)+limit+("--output",temp.name,"--timeout",str(timeout),kw),stdout=STREAM)
-    watcher.watch(action)
+    watcher.watch(action,done)
     code = yield done
     note.magenta('code',code)
     results = yield directory(temp.name)
@@ -221,7 +225,7 @@ def download(watcher, chk, type=None, modification=None):
     # just have to wait for the file to be reference dropped / garbage collected...
     temp = tempo()
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-    watcher.watch(action)
+    watcher.watch(action,exited)
     note('downloadid')
     yield exited
     note('got it')
@@ -234,9 +238,8 @@ def download(watcher, chk, type=None, modification=None):
     note('lengthb',length)
     temp.seek(0,0)
     if modification:
-        derp = (modification,modification)
-        note.yellow('mod',modification,len(derp))
-        os.utime(temp.fileno(),derp)
+        note.yellow('mod',modification)
+        os.utime(temp.name,(modification,modification))
     # X-SendFile this baby
     # temp won't delete upon returning this, since not at 0 references
     raise Return((temp,type,length))

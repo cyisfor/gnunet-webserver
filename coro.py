@@ -5,6 +5,9 @@ from tornado import gen
 from functools import wraps
 import traceback
 import sys
+
+class Exit(Exception): pass
+
 def tracecoroutine(f):
     @wraps(f)
     def wrapper(*a,**kw):
@@ -27,6 +30,8 @@ def tracecoroutine(f):
             while gen.is_future(value):
                 value = yield value
             raise gen.Return(value)
+        except Exit:
+            raise
         except:
             note.alarm('error in ',f)
             traceback.print_exc()

@@ -78,10 +78,12 @@ class Handler(myserver.ResponseHandler):
         self.keyword = self.filepath.split('/',1)[0]
         self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword
         try: 
-            chk, name, info, expires = sksCache[(self.ident,self.keyword)]
+            chk, name, info, expires = sksCache[(self.ident,self.filepath)]
             if expires >= time.time():
                 # XXX: is this the best way to do this?
-                gnunet.searches.remove(self.uri)
+                try: del gnunet.searches[self.uri]
+                except KeyError: pass
+                # ......XXX: this is getting called many times
                 return self.startDownload(chk,name,info)
             else:
                 self.oldCHK = chk # don't remove this YET 
@@ -98,7 +100,8 @@ class Handler(myserver.ResponseHandler):
         chk, name, info = results[-1]
         if self.oldCHK and self.oldCHK != chk:
             # did a previous search expire that we need to confirm changed?
-            gnunet.downloads.remove(self.oldCHK)
+            try: del gnunet.downloads[self.oldCHK]
+            except KeyError: pass
             self.oldCHK = None
         expiry = info.get(expiryName)
         if expiry:
@@ -107,7 +110,7 @@ class Handler(myserver.ResponseHandler):
                 expiry = self.defaultExpiry
         else:
             expiry = self.defaultExpiry
-        sksCache[(self.ident,self.keyword)] = (chk,name,info,time.time()+expiry)
+        sksCache[(self.ident,self.filepath)] = (chk,name,info,time.time()+expiry)
         raise Return(self.startDownload(chk,name,info))
     def cleanSKS(self,oldinfos):
         indexfiles = {}
@@ -162,8 +165,7 @@ class Handler(myserver.ResponseHandler):
         temp,type,length = yield gnunet.download(chk,type,modification)
         # and now we have the best hope to know the type
         if not self.isDir and type == 'application/gnunet-directory':
-            raise Redirect(self.path+'/')
-
+            self.redirect(self.path+'/')
         result = yield self.sendfile(chk,name,info,temp,type,length)
         raise Return(result)
     @tracecoroutine
