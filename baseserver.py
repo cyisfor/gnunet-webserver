@@ -81,7 +81,7 @@ class Handler(myserver.ResponseHandler):
             self.filepath = None
         self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword
         try: 
-            chk, name, info, expires = sksCache[(self.ident,self.keyword,self.filepath)]
+            chk, name, info, expires = sksCache[(self.ident,self.keyword)]
             if expires >= time.time():
                 # XXX: is this the best way to do this?
                 try: del gnunet.searches[self.uri]
@@ -113,7 +113,7 @@ class Handler(myserver.ResponseHandler):
                 expiry = self.defaultExpiry
         else:
             expiry = self.defaultExpiry
-        sksCache[(self.ident,self.keyword,self.filepath)] = (chk,name,info,time.time()+expiry)
+        sksCache[(self.ident,self.keyword)] = (chk,name,info,time.time()+expiry)
         raise Return(self.startDownload(chk,name,info))
     def cleanSKS(self,oldinfos):
         indexfiles = {}

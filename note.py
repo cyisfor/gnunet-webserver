@@ -74,7 +74,7 @@ if 'debug' in os.environ:
         def note(self,*s):
             output(color('green',bold=True),s)
         def alarm(self,*s):
-            output(color('red'),s)
+            output(color('red',bold=True),s)
         def __call__(self,*s):
             output(color('green'),s)
         def __getattr__(self,n):

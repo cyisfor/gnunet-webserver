@@ -35,7 +35,7 @@ try: os.mkdir(tmpdir)
 except OSError: pass
 
 def tempo(ident):
-    return nanny.watch(ShenanigansTemporaryFile(ident,dir=tmpdir))
+    return nanny.watch(lambda: ShenanigansTemporaryFile(ident,dir=tmpdir))
 
 def decode(prop,value):
     if prop == 'publication date':
@@ -65,6 +65,7 @@ def start(op,*args,**kw):
 
 embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
+
 @tracecoroutine
 def directory(path,examine=None):
     if not examine:
@@ -210,7 +211,7 @@ def search(watcher, kw,limit=None):
     else:
         limit = ()
     if kw.startswith('gnunet://fs/sks/'):
-        temp = tempo(kw[len('gnunet://fs/sks/')].split('/')[0])
+        temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0])
     else:
         temp = tempo(kw.replace('%','%20').replace('/','%2f'))
 
@@ -230,7 +231,7 @@ def search(watcher, kw,limit=None):
 def download(watcher, chk, type=None, modification=None):
     # can't use with statement, since might be downloading several times from many connections
     # just have to wait for the file to be reference dropped / garbage collected...
-    temp = tempo(chk[len('gnunet://fs/chk/')].split('/')[0])
+    temp = tempo(chk[len('gnunet://fs/chk/'):].split('/')[0])
     action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
     watcher.watch(action,exited)
     note('downloadid')

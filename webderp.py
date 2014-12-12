@@ -100,21 +100,25 @@ class Handler(baseserver.Handler):
                 # now find the chk/info of the filename in this directory
                 gotit = False
                 def oneResult(chk,name,info):
-                    note.blue('name',name,chk,info,bold=True)
+                    note.blue('name',repr(name),chk,info,bold=True)
                     nonlocal gotit
                     if name == self.filepath:
+                        note.red('gotit!')
                         gotit = (chk,name,info)
                         return True
+                note.cyan('wanted',repr(self.filepath),bold=True)
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
                     chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
-                        if self.subsequent:
-                            self.filepath = self.subsequent.pop(0)
+                        if self.filepath:
+                            self.keyword,self.filepath = self.filepath.split('/',1)
                         else:
+                            self.keyword = self.filepath
                             self.filepath = None
                     else:
-                        assert not self.subsequent, "No subdirs below a normal file!"
+                        assert not '/' in self.filepath, "No subdirs below a normal file!"
+                        self.isDir = False
                     # going down....
                     raise Return(self.startDownload(chk,name,info))
                 else:

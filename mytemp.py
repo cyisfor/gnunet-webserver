@@ -12,15 +12,21 @@ class ShenanigansTemporaryFile:
         else:
             path = os.path.join(dir,name+'.tmp')
             encoding = encoding if encoding else 'utf-8' if text else None
-            fd = open(path,'w',encoding=encoding)
         self.name = path
-        self.raw = os.fdopen(fd,'w+b')
-        if encoding:
-            if encoding is True:
-                encoding = 'utf-8'
-            self.file = io.TextIOWrapper(self.raw,encoding=encoding)
+        if name is not None:
+            self.file = open(path,('w+t' if text else 'w+b'),encoding=encoding)
+            if encoding or text:
+                self.raw = self.file.raw
+            else:
+                self.raw = self.file
         else:
-            self.file = self.raw
+            self.raw = os.fdopen(fd,'w+b')
+            if encoding:
+                if encoding is True:
+                    encoding = 'utf-8'
+                self.file = io.TextIOWrapper(self.raw,encoding=encoding)
+            else:
+                self.file = self.raw
         weakref.finalize(self, os.unlink, path)
     def commit(self):
         # assumes not a tempfile...
