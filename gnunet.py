@@ -207,6 +207,8 @@ class DownloadProgress(Cancellable):
     unit=None
     lastblock=None
 
+    needlasttime = False
+
     pattern = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
     @tracecoroutine
     def watch(self,action,done):
@@ -251,7 +253,7 @@ class Searches(Cache):
     @tracecoroutine
     def start(self, kw, limit=None,timeout=None):
         watcher = SearchProgress(kw)
-        if watcher.sks
+        if watcher.sks:
             temp = tempo(watcher.keyword[goof+len('/sks/'):].split('/')[0],expires=timeout/1000000)
         else:
             temp = tempo(watcher.keyword.replace('%','%20').replace('/','%2f'),expires=timeout/1000000)
@@ -269,7 +271,8 @@ class Searches(Cache):
         watcher.done.add_done_callback(partial(self.maybederp,watcher))
         raise Return(watcher)
     def maybederp(self, watcher, future):
-        ioloop.IOLoop.instance().call_later(10000,self.maybedel,watcher,kw))
+        # eh, leave 'em around for like 10 seconds maybe
+        ioloop.IOLoop.instance().call_later(10000,self.maybedel,watcher,kw)
     def check(self, watcher, kw, limit=None, timeout=None):
         # the watcher builds results streamily, 
         # so to save us from yield directory(...) every time here.
@@ -300,29 +303,37 @@ class Downloads(Cache):
 # better to see a partial file, or a "still downloadan"?
 #        if watcher.done.running():
 #            return False
-        note('got it?',watcher.done.running() is False)
-        if not type:
-            # XXX: what about partial files?
-            type = derpmagic.guess_type(watcher.temp.fileno())[0]
-            note.yellow('type guessed',type)
-        length = 0
-        # wait until we get at least SOME length.
-        while True:
-            watcher.temp.seek(0,2) # is this faster than fstat?
-            length = watcher.temp.tell()
-            if not watcher.done.running() or length > 0:
-                break
-            yield gen.with_timeout(1000,watcher.done)
-        note('lengthb',length)
+        if not self.type:
+            self.type= type
+        if watcher.done.running() or watcher.needlasttime:
+            if watcher.needlasttime:
+                watcher.needlasttime = False
+            else:
+                # wait until we get at least SOME length.
+                while True:
+                    watcher.temp.seek(0,2) # is this faster than fstat?
+                    watcher.length = watcher.temp.tell()
+                    if not watcher.done.running() or watcher.length > 0:
+                        break
+                    yield gen.with_timeout(1000,watcher.done)
+            if not watcher.type:
+                watcher.type = derpmagic.guess_type(watcher.temp.fileno())[0]
+                note.yellow('type guessed',type)
+        note('lengthb',watcher.length)
         watcher.temp.seek(0,0)
         # X-SendFile this baby
         # watcher.temp won't delete upon returning this, since not at 0 references
         # even though watcher is collected if watcher.done
-        raise Return((watcher.temp,type,length))
+        # XXX: technically this is horribly wrong
+        # downloading the file on one connection, then downloading it in the other
+        # will cause the first connection's progress to start over, and
+        # connections to get mixed pieces of the file
+        raise Return((watcher.temp,type,watcher.length))
     def finish(self,modification):
         if modification:
             note.yellow('mod',modification)
             os.utime(watcher.temp.name,(modification,modification))
+        watcher.needlasttime = True
 
 # does not necessarily keep open files, but may accumulate lots of temp files on disk
 # ( all should be deleted on program close )

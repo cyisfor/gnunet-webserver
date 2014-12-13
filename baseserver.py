@@ -39,6 +39,7 @@ class Handler(myserver.ResponseHandler):
     def get(self):
         try: self.breakdown()
         except ValueError: pass
+        print('kind',self.kind)
         return getattr(self,'handle'+self.kind.upper())()
     def internal(self):
         self.write('serve static stuff from where self.path is')
@@ -68,7 +69,8 @@ class Handler(myserver.ResponseHandler):
         # mimetype=application/gnunet-directory redirects to add '/' if not already isDir
         # ...because relative links screwed up if not end in '/'
 
-        self.kind,self.rest = self.path.split('/',1)
+        self.kind = self.path[1:]
+        self.kind,self.rest = self.kind.split('/',1)
         self.ident,tail = self.rest.split('/',1)
         self.filepath,self.meta = self.parseMeta(tail)
         if '/' in self.filepath:

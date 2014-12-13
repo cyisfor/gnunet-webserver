@@ -126,28 +126,28 @@ def processDirectory(top, upper, here, info, path):
     raise Return(doc)
 
 class Handler(baseserver.Handler):
+    action = None
     def __init__(self,*a,**kw):
         note.magenta("Creating a Handler!",id(self))
         super().__init__(*a,**kw)
     def handle(self):
         return self.redirect(self.default)
     def handleSTATUS(self):
-        self.isDir = '/' in self.rest
-        if not self.isDir:
+        if self.rest is None:
             return self.redirect(self.path + '/')
         if self.ident:
             try: self.kind, self.action = self.filepath.split('/',1)
             except ValueError:
                 self.kind = self.filepath
                 self.action = None
-            if not self.action:
-                return self.showStatus()
+        if not self.action:
+            return self.showStatus()
     def showStatus(self):
         doc = BeautifulSoup(statusTemplate)
         table = doc.find(id='searches')
         # <th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
-        for search in gnunet.searches:
-            info = '/status/'+search.kw
+        for sks,search in gnunet.searches.items():
+            info = '/status/'+search.keyword
             if search.sks:
                 check = '/sks/'
                 fancyname = search.keyword[goof+5:goof+5+8]
@@ -219,10 +219,7 @@ class Handler(baseserver.Handler):
             action('forget','Forget Search')
             cell(p)
             # XXX: do the rest l8r
-
-
-
-
+        return self.sendblob(str(doc),'text/html; charset=utf-8')
     @tracecoroutine
     def sendblob(self,blob,type):
         yield self.send_header('Content-Type',type)
