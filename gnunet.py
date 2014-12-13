@@ -161,13 +161,13 @@ class SearchProgress(Cancellable):
     supplemental = None
     buffer = b''
     def __init__(self,kw):
-        if type(kw) == 'str':
+        if type(kw) == str:
             self.keyword = kw
         else:
             self.keyword = kw[0]
             self.supplemental = kw[1:]
         if self.keyword.startswith(goofs+'/sks/'):
-            watcher.sks = True
+            self.sks = True
         self.parser = DirectoryParser()
         super().__init__()
     def watch(self,action,done):
@@ -242,12 +242,18 @@ class Cache(pylru.lrucache):
             code = yield gen.with_timeout(1000, watcher.done)
             note.magenta(type(self),'finished code',code)
         except gen.TimeoutError: pass
-        raise Return(self.check(watcher,key,*a,**kw))
+        watcher.finished = self.check(watcher,key,*a,**kw)
+        raise Return(watcher.finished)
     def maybedel(self,old,kw):
         try: watcher = self[kw]
         except KeyError: return
         if watcher is old:
             del self[kw]
+
+def success(result):
+    future = gen.Future()
+    future.set_result(result)
+    return future
 
 class Searches(Cache):
     @tracecoroutine
@@ -276,7 +282,7 @@ class Searches(Cache):
     def check(self, watcher, kw, limit=None, timeout=None):
         # the watcher builds results streamily, 
         # so to save us from yield directory(...) every time here.
-        return watcher.parser.results
+        return success(watcher.parser.results)
 
 searches = Searches(0x800)
 search = searches.proc # __call__ is confusing/slow

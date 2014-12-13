@@ -140,27 +140,38 @@ class Handler(baseserver.Handler):
             except ValueError:
                 self.kind = self.filepath
                 self.action = None
-        if not self.action:
+        if self.action:
+            return getattr(self,'do'+self.action.title())()
             return self.showStatus()
+    def doInterrupt(self): pass
+    def doCancel(self):
+        keywords = self.ident.split(',')
+        if len(keywords) == 0:
+            keywords = keywords[0]
+        note.magenta('keywords',keywords)
+        search = searches[keywords]
+        search.cancel()
+    def doInfo(self):
+        self.write("derp")    
     def showStatus(self):
         doc = BeautifulSoup(statusTemplate)
         table = doc.find(id='searches')
         # <th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
-        for sks,search in gnunet.searches.items():
-            info = '/status/'+search.keyword
+        for keywords,search in gnunet.searches.items():
+            status = '/status/'+','.join(keywords)
             if search.sks:
                 check = '/sks/'
                 fancyname = search.keyword[goof+5:goof+5+8]
             else:
                 check = '/ksk/'
-                check += quote(gnunet.encode(search.keyword))
+                check += quote(gnunet.encode('keyword',search.keyword))
                 fancyname = search.keyword
             info = {}
             if search.supplemental:
                 info['keywords'] = ','.join(search.supplemental)
                 fancyname = fancyname + ' ' + ', '.join(search.supplemental)
             if info:
-                query = '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(v)) for n,v in info)
+                query = '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
             else:
                 query = ''
             
@@ -168,7 +179,7 @@ class Handler(baseserver.Handler):
             table.append(row)
             def cell(e):
                 td = doc.new_tag('td')
-                tr.append(td)
+                row.append(td)
                 td.append(e)
             a = doc.new_tag('a')
             a['href'] = check + query
@@ -184,7 +195,7 @@ class Handler(baseserver.Handler):
                         tr.append(td)
                 subtab.append(tr)
             subrow('CHK','Name','Meta',head=True)
-            for result in results:
+            for result in search.parser.results:
                 if result[2]:
                     dl = doc.new_tag('dl')
                     presentInfo(doc,dl,result[2])
@@ -192,13 +203,13 @@ class Handler(baseserver.Handler):
                     dl = None
                 subrow(result[0],result[1],dl)
             cell(subtab)
-            if result.request.running():
-                num = str(len(result.request._callbacks))
+            if search.finished.running():
+                num = str(len(result.finished._callbacks))
                 if result.done.running():
                     cell('Requested ('+num+')')
                 else:
                     cell('Requested ('+num+') (done)')
-            elif result.done.running():
+            elif search.done.running():
                 cell('Searching')
             else:
                 cell('Idle')
@@ -206,7 +217,8 @@ class Handler(baseserver.Handler):
             def action(ident,name):
                 nonlocal p
                 a = doc.new_tag('a')
-                a['href'] = info + ident
+                note.yellow('um',repr(status),repr(ident))
+                a['href'] = status + '/' + ident
                 a.append(name)
                 if p:
                     p.append(' ')
