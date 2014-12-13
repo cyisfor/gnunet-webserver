@@ -106,6 +106,9 @@ class Handler(myserver.ResponseHandler):
             try: searches[self.uri].pause()
             except KeyError: pass
             raise
+        if not results:
+            self.write("No results yet bleh "+self.uri+'\n')
+            return
         results.sort(key=lambda result: result[-1]['publication date'])
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]

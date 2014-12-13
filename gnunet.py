@@ -64,57 +64,69 @@ def start(op,*args,**kw):
 embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
 
-@tracecoroutine
-def directory(path,examine=None):
-    if not examine:
-        results = []
-    diract,done = start('directory',path,stdout=STREAM)
+class DirectoryParser:
     getting = False
     chk = None
-    while True:
-        try: line = yield diract.stdout.read_until(b'\n')
-        except StreamClosedError: break
-        line = line.decode('utf-8')
-        if not getting:
+    name = None
+    meta = None
+    def __init__(self):
+        self.results = []
+    def take(self,line):
+        if not self.getting:
             if dircontents.match(line):
-                note.blue('yay getting',bold=True)
-                getting = True
+                note.blue('yay self.getting',bold=True)
+                self.getting = True
             continue
-        if not chk:
+        if not self.chk:
             if line == '\n': break # eof here
-            name,chk = line.rsplit(' (',1)
-            chk = chk[:-3] # extra paren, colon, newline
-            result = {}
+            self.name,self.chk = line.rsplit(' (',1)
+            self.chk = self.chk[:-3] # extra paren, colon, newline
+            self.meta = {}
         else:
             line = line.strip()
             if line:
                 if line[0] == '<':
                     match = embedded.match(line)
                     if match:
-                        result['size'] = match.group(1)
+                        self.meta['size'] = match.group(1)
                 else:
                     prop,value = line.split(': ',1)
-                    result[prop] = decode(prop,value)
+                    self.meta[prop] = decode(prop,value)
             else:
                 if examine:
-                    finished = examine(chk,name,result)
+                    finished = examine(self.chk,self.name,self.meta)
                     if finished:
                         diract.stdout.close()
                         break
                 else:
-                    results.append((chk,name,result))
-                chk = None
+                    self.results.append((self.chk,self.name,self.meta))
+                self.chk = None
+    def finish(self):
+        assert self.chk is None, "Didn't finish parsing directory!"
+        return self.results
+
+@tracecoroutine
+def directory(path,examine=None):
+    if not examine:
+        results = []
+    diract,done = start('directory',path,stdout=STREAM)
+    parser = DirectoryParser()
+    while True:
+        try: line = yield diract.stdout.read_until(b'\n')
+        except StreamClosedError: break
+        parser.take(line.decode('utf-8'))
     yield done
     if not examine:
-        if not results:
+        if not parser.results:
             note.yellow('warning, empty directory',path)
-        raise Return(results)
+        raise Return(parser.finish())
     else:
         note('examining')
 
 def cancellable(entries):
     class Cancellable(makeobj(entries)):
         action = None
+        done = None
         cancelled = True # starts out needing finalizing?
         def __init__(self):
             super().__init__()
@@ -127,6 +139,7 @@ def cancellable(entries):
             self.cancelled = True
         def watch(self,action,done):
             self.action = action
+            self.done = done
             if self.cancelled:
                 done.add_done_callback(self.nocancel)
                 weakref.finalize(self,self.cancel)
@@ -136,18 +149,39 @@ def cancellable(entries):
 
 class SearchProgress(cancellable({
     'amount': 0})):
+    buffer = b''
     def __init__(self):
-        self.results = []
+        self.parser = DirectoryParser()
         super().__init__()
     def watch(self,action,done):
-        action.stdout.read_until_close(callback=lambda *a: None,
+        action.stdout.read_until_close(callback=self.dumpbuf,
                 streaming_callback=partial(self.streaming,action))
+        done.add_done_callback(self.dumpbuf)
         return super().watch(action,done)
+    def dumpbuf(self):
+        # final line might not be a newline (not really)
+        self.parser.take(self.buffer.encode('utf-8'))
+        self.parser.finish()
     def streaming(self,action,chunk):
-        note.magenta('search chunk',chunk)
-        self.amount += len(chunk)
+        self.buffer += chunk
+        note.magenta('search chunk',len(chunk))
+        try: 
+            sbuf = self.buffer.decode('utf-8')
+            rawtail = None
+        except UnicodeDecodeError as e: 
+            sbuf = self.buffer[:e.start].decode('utf-8')
+            rawtail = buffer[e.start:]
+        lines = sbuf.split('\n')
+        tail = lines[-1]
+        lines = lines[:-1]
+        # have to decode/re-encode to find where the newline is at the end.
+        self.buffer = lines.encode('utf-8')
+        if rawtail:
+            self.buffer += rawtail
+        for line in lines:
+            self.parser.take(line)
 
-class DownloadProgress(finishable({
+class DownloadProgress(cancellable({
     'current': 0,
     'total': 1,
     'remaining': 0,
@@ -173,31 +207,31 @@ class DownloadProgress(finishable({
 
 class Cache(pylru.lrucache):
     @tracecoroutine
-    def proc(self,*a,**kw):
+    def proc(self,key,*a,**kw):
         try:
             watcher = self[key]
         except KeyError: 
-            note.green('starting',self.startup)
-            watcher = yield self.startup(*a,**kw)
+            note.green('starting',self.start)
+            watcher = yield self.start(key,*a,**kw)
             self[key] = watcher
             # or leave old watchers in cache? how to refresh then?
         # need to wait until either done, or a shorter timeout, then use the file if that second one
         # even if search is not done.
         # but try to return results sooner if we can.
         try: 
-            code = yield ioloop.with_timeout(1, watcher.done)
+            code = yield gen.with_timeout(1000, watcher.done)
             note.magenta(type(self),'finished code',code)
-        except ioloop.TimeoutError: pass
-        raise Return(self.check(watcher,*a,**kw))
+        except gen.TimeoutError: pass
+        raise Return(self.check(watcher,key,*a,**kw))
 
 class Searches(Cache):
     @tracecoroutine
     def start(self, kw, limit=None,timeout=None):
         watcher = SearchProgress()
         if kw.startswith('gnunet://fs/sks/'):
-            temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=expires)
+            temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=timeout/1000000)
         else:
-            temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=expires)
+            temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=timeout/1000000)
         watcher.isExpired = temp.isExpired
         if limit:
             limit = ('--results',str(limit))
@@ -206,15 +240,15 @@ class Searches(Cache):
         if timeout is not None:
             expires = timeout
             timeout = ('--timeout',str(timeout))
-        action,done = start(*("search","-V")+limit+timeout,stdout=STREAM)
+        action,done = start(*("search","-V")+limit+timeout+(kw,),stdout=STREAM)
         watcher.watch(action,done)
         # don't leave old searches around... they change
-        watcher.done.add_done_callback(operator.delitem,self,key)
-        return watcher
+        watcher.done.add_done_callback(lambda done: operator.delitem(self,kw))
+        raise Return(watcher)
     def check(self, watcher, kw, limit=None, timeout=None):
         # the watcher builds results streamily, 
         # so to save us from yield directory(...) every time here.
-        return watcher.results
+        return watcher.parser.results
 
 searches = Searches(0x800)
 search = searches.proc # __call__ is confusing/slow
@@ -253,7 +287,7 @@ class Downloads(Cache):
             length = watcher.temp.tell()
             if not watcher.done.running() or length > 0:
                 break
-            yield with_timeout(watcher.done,1)
+            yield gen.with_timeout(1000,watcher.done)
         note('lengthb',length)
         watcher.temp.seek(0,0)
         # X-SendFile this baby
