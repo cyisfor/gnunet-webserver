@@ -112,6 +112,9 @@ class Handler(baseserver.Handler):
     def __init__(self,*a,**kw):
         note.magenta("Creating a Handler!",id(self))
         super().__init__(*a,**kw)
+    def internal(self):
+        if not self.kind: 
+            self.redirect(self.default)
     @tracecoroutine
     def sendblob(self,blob,type):
         yield self.send_header('Content-Type',type)

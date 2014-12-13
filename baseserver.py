@@ -35,14 +35,10 @@ class Handler(myserver.ResponseHandler):
     keyword = None
     ident = None
     def get(self):
-        if self.path == '/':
-            return self.redirect(self.default)
-        else:
-            try: self.breakdown()
-            except ValueError:
-                return self.static()
-            return getattr(self,'handle'+self.kind.upper())()
-    def static(self):
+        try: self.breakdown()
+        except ValueError: pass
+        return getattr(self,'handle'+self.kind.upper())()
+    def internal(self):
         self.write('serve static stuff from where self.path is')
     def parseMeta(self, path):
         try: path, query = path.split('?',1)
@@ -59,6 +55,9 @@ class Handler(myserver.ResponseHandler):
         "Extract meaningful info we need from the URL"
         # /sks/ident/keyword/filepathtail?metadata
         # /chk/ident/filepath?metadata
+        # /status/
+        # /status/ident/kind
+        # /status/ident/kind/action
         
         # for sks, keyword must be parsed out, but filepath = keyword/filepathtail (or just keyword)
         # sks search = /sks/ident/keyword, sks filepath = keyword/filepathtail sigh
@@ -67,7 +66,7 @@ class Handler(myserver.ResponseHandler):
         # mimetype=application/gnunet-directory redirects to add '/' if not already isDir
         # ...because relative links screwed up if not end in '/'
 
-        self.kind,rest = self.path[1:].split('/',1)
+        self.kind,rest = self.path.split('/',1)
         self.ident,tail = rest.split('/',1)
         self.filepath,self.meta = self.parseMeta(tail)
         if '/' in self.filepath:

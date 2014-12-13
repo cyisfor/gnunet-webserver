@@ -64,6 +64,8 @@ def start(op,*args,**kw):
 embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
 
+startpat = re.compile('gnunet-download -o "(.*?)".*?(gnunet://.*)')
+
 class DirectoryParser:
     getting = False
     chk = None
@@ -72,19 +74,24 @@ class DirectoryParser:
     def __init__(self):
         self.results = []
     def take(self,line):
+        note.cyan('directory',line)
         if not self.getting:
             if dircontents.match(line):
                 note.blue('yay self.getting',bold=True)
                 self.getting = True
-            continue
+            return False
         if not self.chk:
-            if line == '\n': break # eof here
-            self.name,self.chk = line.rsplit(' (',1)
-            self.chk = self.chk[:-3] # extra paren, colon, newline
+            if line == '\n': return True # eof here
+            # sigh... gnunet-search -V harder to parse than gnunet-directory
+            match = startpat.search(line)
+            assert match, "bad line "+line
+            self.name,self.chk = match.groups()
             self.meta = {}
+            note.magenta('got chk',self.chk)
         else:
             line = line.strip()
             if line:
+                # sigh... never get this with gnunet-search -V
                 if line[0] == '<':
                     match = embedded.match(line)
                     if match:
@@ -97,7 +104,7 @@ class DirectoryParser:
                     finished = examine(self.chk,self.name,self.meta)
                     if finished:
                         diract.stdout.close()
-                        break
+                        return True
                 else:
                     self.results.append((self.chk,self.name,self.meta))
                 self.chk = None
@@ -114,7 +121,10 @@ def directory(path,examine=None):
     while True:
         try: line = yield diract.stdout.read_until(b'\n')
         except StreamClosedError: break
-        parser.take(line.decode('utf-8'))
+        if parser.take(line.decode('utf-8')):
+            # finished
+            diract.stdout.close()
+            break
     yield done
     if not examine:
         if not parser.results:
@@ -156,11 +166,10 @@ class SearchProgress(cancellable({
     def watch(self,action,done):
         action.stdout.read_until_close(callback=self.dumpbuf,
                 streaming_callback=partial(self.streaming,action))
-        done.add_done_callback(self.dumpbuf)
         return super().watch(action,done)
-    def dumpbuf(self):
+    def dumpbuf(self, future):
         # final line might not be a newline (not really)
-        self.parser.take(self.buffer.encode('utf-8'))
+        self.parser.take(self.buffer.decode('utf-8'))
         self.parser.finish()
     def streaming(self,action,chunk):
         self.buffer += chunk
@@ -175,11 +184,13 @@ class SearchProgress(cancellable({
         tail = lines[-1]
         lines = lines[:-1]
         # have to decode/re-encode to find where the newline is at the end.
-        self.buffer = lines.encode('utf-8')
+        self.buffer = tail.encode('utf-8')
         if rawtail:
             self.buffer += rawtail
         for line in lines:
-            self.parser.take(line)
+            if self.parser.take(line):
+                # finished
+                return
 
 class DownloadProgress(cancellable({
     'current': 0,
