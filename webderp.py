@@ -97,7 +97,7 @@ def processDirectory(top, upper, here, info, path):
         nav.append(link)
     if top:
         addLink(interpretLink(top)+'/','first','Top')
-        addLink(interpretLink(here)+'/','next','Root here')
+        addLink(interpretLink(here),'next','Root here')
     if upper:
         addLink(interpretLink(upper)+'/','up','Up')
     presentInfo(doc,doc.find(id='info'),info)
@@ -111,8 +111,6 @@ def processDirectory(top, upper, here, info, path):
         td = doc.new_tag('td')
         a = doc.new_tag('a')
         a['href'] = name # relative links woo
-        if info['mimetype'] == 'application/gnunet-directory':
-            a['href'] += '/'
         a['id'] = chk # don't go to this, since we want to remember our parent directory
         a.append(name)
         td.append(a)
@@ -255,41 +253,37 @@ class Handler(baseserver.Handler):
         note.yellow('type',type,self.isDir,bold=True)
         if self.isDir:
             if len(self.filepath) > 0:
-                note.yellow('sub-entry here',self.filepath,bold=True)
+                try: test,self.filepath = self.filepath.split('/',1)
+                except ValueError:
+                    test = self.filepath
+                note.yellow('sub-entry here',self.filepath,test,bold=True)
                 # now find the chk/info of the filename in this directory
                 gotit = False
-                def oneResult(chk,name,info):
-                    note.blue('name',repr(name),chk,info,bold=True)
+                def oneResult(chk,name,info):                    
+                    note.blue('name',repr(name),repr(test),bold=True)
                     nonlocal gotit
-                    if name == self.filepath:
+                    if name.rstrip('/') == test:
                         note.red('gotit!')
                         gotit = (chk,name,info)
                         return True
                 note.cyan('wanted',repr(self.filepath),bold=True)
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
-                    chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
                         if self.top is None:
-                            self.top = self.uri
-                        if self.upper is None:
-                            self.upper = self.uri
-                        if self.filepath:
-                            self.keyword,self.filepath = self.filepath.split('/',1)
-                        else:
-                            self.keyword = self.filepath
-                            self.filepath = None
+                            self.top = self.path
+                        self.upper = chk
                     else:
-                        assert not '/' in self.filepath, "No subdirs below a normal file!"
+                        assert not '/' in test, "No subdirs below a normal file!"
                         self.isDir = False
+                    chk,name,info = gotit
                     # going down....
                     raise Return(self.startDownload(chk,name,info))
                 else:
                     # a filename not in this directory.
-                    self.write("Oh a wise guy, eh? "+repr(self.filepath))
-                return
+                    note.alarm("Oh a wise guy, eh? "+repr(self.filepath))
             # the directory itself, no sub-entry filename
-            doc = yield processDirectory(self.top,self.upper,chk,info,temp.name)
+            doc = yield processDirectory(self.top,self.upper,chk+'/',info,temp.name)
             del temp
             raise Return(self.sendblob(str(doc).encode('utf-8'),'text/html'))
         elif type == 'text/html':

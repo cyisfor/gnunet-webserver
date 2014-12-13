@@ -323,6 +323,7 @@ class Downloads(Cache):
             exited.add_done_callback(lambda exited: self.finish(watcher,modification))
         else:
             watcher.done = success(0)
+            self.finish(watcher,modification)
         # DO leave old downloads around... makes things way easier
         return success(watcher)
     @tracecoroutine
@@ -337,6 +338,8 @@ class Downloads(Cache):
         if watcher.done.running() or watcher.needlasttime:
             if watcher.needlasttime:
                 watcher.needlasttime = False
+                watcher.temp.seek(0,2) # is this faster than fstat?
+                watcher.length = watcher.temp.tell()
             else:
                 # wait until we get at least SOME length.
                 while True:
@@ -346,8 +349,13 @@ class Downloads(Cache):
                         break
                     yield gen.with_timeout(time.time()+1,watcher.done)
             if not watcher.type:
-                watcher.type = derpmagic.guess_type(watcher.temp.fileno())[0]
-                note.yellow('type guessed',type)
+                try: type = derpmagic.guess_type(watcher.temp.fileno())[0]
+                except ValueError:
+                    note.alarm('ugggggh')
+                else:
+                    note.yellow('type guessed',type)
+                    if type != 'application/x-empty':
+                        watcher.type = type
         note('lengthb',watcher.length)
         watcher.temp.seek(0,0)
         # X-SendFile this baby
@@ -357,7 +365,7 @@ class Downloads(Cache):
         # downloading the file on one connection, then downloading it in the other
         # will cause the first connection's progress to start over, and
         # connections to get mixed pieces of the file
-        raise Return((watcher.temp,type,watcher.length))
+        raise Return((watcher.temp,watcher.type,watcher.length))
     def finish(self,watcher,modification):
         if modification:
             note.yellow('mod',modification)

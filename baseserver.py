@@ -77,8 +77,11 @@ class Handler(myserver.ResponseHandler):
             self.isDir = self.rest.endswith('/')
             return
         self.filepath,self.meta = self.parseMeta(tail)
-        if '/' in self.filepath:
+        if not self.filepath or '/' in self.filepath:
             self.isDir = True
+        else:
+            note.alarm('not a dirr',self.filepath)
+            os._exit(3)
         # check for mimetype directory later not now since SKS can add it
     oldCHK = None
     def handleSKS(self):
@@ -157,8 +160,8 @@ class Handler(myserver.ResponseHandler):
         chk = goofs + '/chk/' + self.ident
         # should we check if self.oldCHK is here, and set it to None if it matches?
         # how to "expire" downloads requested by CHK? Just wait for the cache to overflow, eh.
-        info.setdefault('publication date',time.gmtime())
-        return self.startDownload(chk,name,info)
+        self.meta.setdefault('publication date',time.gmtime())
+        return self.startDownload(chk,self.filepath,self.meta)
     def startDownload(self,chk,name,info):
         "override this to do stuff if you don't care what the file type or publication date is"
         self.meta.update(info) # this seems a weird place to update this.
@@ -186,6 +189,7 @@ class Handler(myserver.ResponseHandler):
         # as it's guessed from the file contents even if info has no mimetype record
         note('sending',type)
         temp.seek(0,0)
+        assert type, 'bleh'
         yield self.send_header('Content-Type',type)
         modified = info.get('publication date')
         if modified:
