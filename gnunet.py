@@ -8,8 +8,6 @@ import pylru
 import note
 note.monitor(__name__)
 
-from makeobj import makeobj
-
 from tornado.process import Subprocess
 from tornado import gen,ioloop
 from tornado.iostream import StreamClosedError
@@ -65,6 +63,8 @@ embedded = re.compile('<original file embedded in ([0-9]+) bytes of meta data>')
 dircontents = re.compile("Directory `.*?\' contents:\n")
 
 startpat = re.compile('gnunet-download -o "(.*?)".*?(gnunet://.*)')
+
+goofs = len('gnunet://fs')
 
 class DirectoryParser:
     getting = False
@@ -133,32 +133,31 @@ def directory(path,examine=None):
     else:
         note('examining')
 
-def cancellable(entries):
-    class Cancellable(makeobj(entries)):
-        action = None
-        done = None
-        cancelled = True # starts out needing finalizing?
-        def __init__(self):
-            super().__init__()
-        def cancel(self):
-            if self.cancelled: return
-            self.cancelled = True
-            self.action.proc.terminate()
-            self.action.stdout.close()
-        def nocancel(self, future):
-            self.cancelled = True
-        def watch(self,action,done):
-            self.action = action
-            self.done = done
-            if self.cancelled:
-                done.add_done_callback(self.nocancel)
-                weakref.finalize(self,self.cancel)
-                self.cancelled = False
-            return done
-    return Cancellable
+class Cancellable:
+    action = None
+    done = None
+    cancelled = True # starts out needing finalizing?
+    def __init__(self):
+        super().__init__()
+    def cancel(self):
+        if self.cancelled: return
+        self.cancelled = True
+        self.action.proc.terminate()
+        self.action.stdout.close()
+    def nocancel(self, future):
+        self.cancelled = True
+    def watch(self,action,done):
+        self.action = action
+        self.done = done
+        if self.cancelled:
+            done.add_done_callback(self.nocancel)
+            weakref.finalize(self,self.cancel)
+            self.cancelled = False
+        return done
 
-class SearchProgress(cancellable({
-    'amount': 0})):
+class SearchProgress(Cancellable):
+    sks = False
+    amount = 0
     buffer = b''
     def __init__(self):
         self.parser = DirectoryParser()
@@ -192,13 +191,13 @@ class SearchProgress(cancellable({
                 # finished
                 return
 
-class DownloadProgress(cancellable({
-    'current': 0,
-    'total': 1,
-    'remaining': 0,
-    'rate': 0,
-    'unit': None,
-    'lastblock': None})):
+class DownloadProgress(Cancellable):
+    current=0
+    total=1
+    remaining=0
+    rate=0
+    unit=None
+    lastblock=None
 
     pattern = re.compile("^Downloading `.*?' at ([0-9]+)/([0-9]+) \\(([0-9]+) ms remaining, ([.0-9]+) (KiB|MiB|B)/s\\). Block took ([0-9]+) ms to download\n")
     @tracecoroutine
@@ -240,7 +239,8 @@ class Searches(Cache):
     def start(self, kw, limit=None,timeout=None):
         watcher = SearchProgress()
         if kw.startswith('gnunet://fs/sks/'):
-            temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=timeout/1000000)
+            watcher.sks = True
+            temp = tempo(kw[goofs+len('/sks/'):].split('/')[0],expires=timeout/1000000)
         else:
             temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=timeout/1000000)
         watcher.isExpired = temp.isExpired
@@ -269,7 +269,7 @@ class Downloads(Cache):
         watcher = DownloadProgress()
         # can't use with statement, since might be downloading several times from many connections
         # just have to wait for the file to be reference dropped / garbage collected...
-        temp = tempo(chk[len('gnunet://fs/chk/'):].split('/')[0])
+        temp = tempo(chk[goofs+len('/chk/'):].split('/')[0])
         watcher.temp = temp
         if temp.new:
             action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)

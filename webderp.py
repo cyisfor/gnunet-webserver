@@ -216,6 +216,7 @@ class Handler(baseserver.Handler):
             action('interrupt','Stop Requests')
             action('cancel','Stop Search')
             action('forget','Forget Search')
+            cell(p)
             # XXX: do the rest l8r
 
 
