@@ -127,23 +127,22 @@ def cancellable(entries):
             self.cancelled = True
         def watch(self,action,done):
             self.action = action
-            ioloop.IOLoop.instance().add_future(done,self.nocancel)
             if self.cancelled:
+                done.add_done_callback(self.nocancel)
                 weakref.finalize(self,self.cancel)
                 self.cancelled = False
+            return done
     return Cancellable
 
-def finishable(entries):
-    class Finishable(cancellable(entries)):
-        finished = None
-    return Finishable
-
-class SearchProgress(finishable({
+class SearchProgress(cancellable({
     'amount': 0})):
+    def __init__(self):
+        self.results = []
+        super().__init__()
     def watch(self,action,done):
-        super().watch(action,done)
-        return action.stdout.read_until_close(callback=lambda *a: None,
+        action.stdout.read_until_close(callback=lambda *a: None,
                 streaming_callback=partial(self.streaming,action))
+        return super().watch(action,done)
     def streaming(self,action,chunk):
         note.magenta('search chunk',chunk)
         self.amount += len(chunk)
@@ -172,90 +171,105 @@ class DownloadProgress(finishable({
                     self.progress()
     progress = None
 
+class Cache(pylru.lrucache):
+    @tracecoroutine
+    def proc(self,*a,**kw):
+        try:
+            watcher = self[key]
+        except KeyError: 
+            note.green('starting',self.startup)
+            watcher = yield self.startup(*a,**kw)
+            self[key] = watcher
+            # or leave old watchers in cache? how to refresh then?
+        # need to wait until either done, or a shorter timeout, then use the file if that second one
+        # even if search is not done.
+        # but try to return results sooner if we can.
+        try: 
+            code = yield ioloop.with_timeout(1, watcher.done)
+            note.magenta(type(self),'finished code',code)
+        except ioloop.TimeoutError: pass
+        raise Return(self.check(watcher,*a,**kw))
 
-searches = pylru.lrucache(0x800)
+class Searches(Cache):
+    @tracecoroutine
+    def start(self, kw, limit=None,timeout=None):
+        watcher = SearchProgress()
+        if kw.startswith('gnunet://fs/sks/'):
+            temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=expires)
+        else:
+            temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=expires)
+        watcher.isExpired = temp.isExpired
+        if limit:
+            limit = ('--results',str(limit))
+        else:
+            limit = ()
+        if timeout is not None:
+            expires = timeout
+            timeout = ('--timeout',str(timeout))
+        action,done = start(*("search","-V")+limit+timeout,stdout=STREAM)
+        watcher.watch(action,done)
+        # don't leave old searches around... they change
+        watcher.done.add_done_callback(operator.delitem,self,key)
+        return watcher
+    def check(self, watcher, kw, limit=None, timeout=None):
+        # the watcher builds results streamily, 
+        # so to save us from yield directory(...) every time here.
+        return watcher.results
+
+searches = Searches(0x800)
+search = searches.proc # __call__ is confusing/slow
+
+class Downloads(Cache):
+    def start(self, chk, type=None, modification=None):
+        watcher = DownloadProgress()
+        # can't use with statement, since might be downloading several times from many connections
+        # just have to wait for the file to be reference dropped / garbage collected...
+        temp = tempo(chk[len('gnunet://fs/chk/'):].split('/')[0])
+        watcher.temp = temp
+        if temp.new:
+            action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
+            watcher.watch(action,exited)
+            note('downloadid')
+            exited.add_done_callback(lambda *a: temp.commit())
+            exited.add_done_callback(lambda exited: self.finish(modification))
+        # DO leave old downloads around... makes things way easier
+        return watcher
+    @tracecoroutine
+    def check(self, watcher, chk, type=None, modification=None):
+# comment this out enables partials
+# comment this in enables status update?
+# better to see a partial file, or a "still downloadan"?
+#        if watcher.done.running():
+#            return False
+        note('got it?',watcher.done.running() is False)
+        if not type:
+            # XXX: what about partial files?
+            type = derpmagic.guess_type(watcher.temp.fileno())[0]
+            note.yellow('type guessed',type)
+        length = 0
+        # wait until we get at least SOME length.
+        while True:
+            watcher.temp.seek(0,2) # is this faster than fstat?
+            length = watcher.temp.tell()
+            if not watcher.done.running() or length > 0:
+                break
+            yield with_timeout(watcher.done,1)
+        note('lengthb',length)
+        watcher.temp.seek(0,0)
+        # X-SendFile this baby
+        # watcher.temp won't delete upon returning this, since not at 0 references
+        # even though watcher is collected if watcher.done
+        raise Return((watcher.temp,type,length))
+    def finish(self,modification):
+        if modification:
+            note.yellow('mod',modification)
+            os.utime(watcher.temp.name,(modification,modification))
 
 # does not necessarily keep open files, but may accumulate lots of temp files on disk
 # ( all should be deleted on program close )
 # ( see nanny / mytemp for details )
-downloads = pylru.lrucache(0x200)
-
-def cached(cache,Thingy,name):
-    def decorator(f):
-        @wraps(f)
-        def wrapper(key,*a,**kw):
-            try:
-                result = cache[key]
-                if result.finished.running():
-                    note.green('already',name)
-                else:
-                    note.green('redoing',name,result.finished.result())
-                return result.finished
-            except KeyError: pass
-            note.green('starting',name,bold=True)
-            result = Thingy()
-            cache[key] = result
-            result.finished = f(result, key, *a, **kw)
-            assert(result.finished)
-            return result.finished
-        return wrapper
-    return decorator
-    
-@cached(searches,SearchProgress,'searching')
-@tracecoroutine
-def search(watcher, kw,limit=None,timeout=None):
-    if limit:
-        limit = ('--results',str(limit))
-    else:
-        limit = ()
-    if timeout is not None:
-        expires = timeout
-        timeout = ('--timeout',str(timeout))
-    if kw.startswith('gnunet://fs/sks/'):
-        temp = tempo(kw[len('gnunet://fs/sks/'):].split('/')[0],expires=expires)
-    else:
-        temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=expires)
-    watcher.isExpired = temp.isExpired
-    if temp.new:
-        action,done = start(*("search",)+limit+timeout+("--output",temp.name,kw),stdout=STREAM)
-        watcher.watch(action,done)
-        code = yield done
-        temp.commit()
-        note.magenta('code',code)
-    results = yield directory(temp.name)
-    assert results, kw
-    del temp
-    # temp file will be deleted now (for search results), since no more references
-    # results.sort(key=lambda result: result[1]['publication date']) do this later
-    raise Return(results)
-
-@cached(downloads,DownloadProgress,'downloading')
-@tracecoroutine
-def download(watcher, chk, type=None, modification=None):
-    # can't use with statement, since might be downloading several times from many connections
-    # just have to wait for the file to be reference dropped / garbage collected...
-    temp = tempo(chk[len('gnunet://fs/chk/'):].split('/')[0])
-    if temp.new:
-        action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)
-        watcher.watch(action,exited)
-        note('downloadid')
-        yield exited
-        temp.commit()
-    note('got it')
-    buf = bytearray(0x1000)
-    if not type:
-        type = derpmagic.guess_type(temp.fileno())[0]
-        note.yellow('type guessed',type)
-    temp.seek(0,2) # is this faster than fstat?
-    length = temp.tell()
-    note('lengthb',length)
-    temp.seek(0,0)
-    if modification:
-        note.yellow('mod',modification)
-        os.utime(temp.name,(modification,modification))
-    # X-SendFile this baby
-    # temp won't delete upon returning this, since not at 0 references
-    raise Return((temp,type,length))
+downloads = Downloads(0x200)
+download = downloads.proc
 
 @tracecoroutine
 def indexed(take):

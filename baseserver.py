@@ -101,7 +101,11 @@ class Handler(myserver.ResponseHandler):
     @tracecoroutine
     def lookup(self):
         # get the CHK for this SKS (the most recent one ofc)
-        results = yield gnunet.search(self.uri,timeout=self.defaultExpiry)
+        try: results = yield gnunet.search(self.uri,timeout=1000000*self.defaultExpiry)
+        except ioloop.TimeoutError:
+            try: searches[self.uri].pause()
+            except KeyError: pass
+            raise
         results.sort(key=lambda result: result[-1]['publication date'])
         self.cleanSKS(results[:-1])
         chk, name, info = results[-1]
@@ -115,7 +119,7 @@ class Handler(myserver.ResponseHandler):
             try: 
                 expiry = float(expiry)
                 if gnunet.searches[self.uri].isExpired(expiry):
-                    del gnunet.surches[self.uri]
+                    del gnunet.searches[self.uri]
                     raise Return(self.lookup())
             except ValueError:
                 expiry = self.defaultExpiry
