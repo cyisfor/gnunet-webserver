@@ -27,6 +27,8 @@ sksCache = {}
 
 expiryName = 'focal length 35mm' # libextractor sucks!
 
+goofs = gnunet.goofs
+
 class Handler(myserver.ResponseHandler):
     code = 200
     message = "Otay"
@@ -82,7 +84,7 @@ class Handler(myserver.ResponseHandler):
         except ValueError:
             self.keyword = self.filepath
             self.filepath = None
-        self.uri = 'gnunet://fs/sks/'+self.ident+'/'+self.keyword
+        self.uri = goofs+'/sks/'+self.ident+'/'+self.keyword
         try: 
             chk, name, info, expires = sksCache[(self.ident,self.keyword)]
             if expires >= time.time():
@@ -160,7 +162,7 @@ class Handler(myserver.ResponseHandler):
             self.ident, name = path.split('/',1)
         except ValueError:
             name = None
-        chk = 'gnunet://fs/chk/' + self.ident
+        chk = goofs + '/chk/' + self.ident
         # should we check if self.oldCHK is here, and set it to None if it matches?
         # how to "expire" downloads requested by CHK? Just wait for the cache to overflow, eh.
         info.setdefault('publication date',time.gmtime())

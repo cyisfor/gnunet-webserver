@@ -64,7 +64,8 @@ dircontents = re.compile("Directory `.*?\' contents:\n")
 
 startpat = re.compile('gnunet-download -o "(.*?)".*?(gnunet://.*)')
 
-goofs = len('gnunet://fs')
+goofs = 'gnunet://fs'
+goof = len(goofs)
 
 class DirectoryParser:
     getting = False
@@ -157,9 +158,16 @@ class Cancellable:
 
 class SearchProgress(Cancellable):
     sks = False
-    amount = 0
+    supplemental = None
     buffer = b''
-    def __init__(self):
+    def __init__(self,kw):
+        if type(kw) == 'str':
+            self.keyword = kw
+        else:
+            self.keyword = kw[0]
+            self.supplemental = kw[1:]
+        if self.keyword.startswith(goofs+'/sks/'):
+            watcher.sks = True
         self.parser = DirectoryParser()
         super().__init__()
     def watch(self,action,done):
@@ -233,16 +241,20 @@ class Cache(pylru.lrucache):
             note.magenta(type(self),'finished code',code)
         except gen.TimeoutError: pass
         raise Return(self.check(watcher,key,*a,**kw))
+    def maybedel(self,old,kw):
+        try: watcher = self[kw]
+        except KeyError: return
+        if watcher is old:
+            del self[kw]
 
 class Searches(Cache):
     @tracecoroutine
     def start(self, kw, limit=None,timeout=None):
-        watcher = SearchProgress()
-        if kw.startswith('gnunet://fs/sks/'):
-            watcher.sks = True
-            temp = tempo(kw[goofs+len('/sks/'):].split('/')[0],expires=timeout/1000000)
+        watcher = SearchProgress(kw)
+        if watcher.sks
+            temp = tempo(watcher.keyword[goof+len('/sks/'):].split('/')[0],expires=timeout/1000000)
         else:
-            temp = tempo(kw.replace('%','%20').replace('/','%2f'),expires=timeout/1000000)
+            temp = tempo(watcher.keyword.replace('%','%20').replace('/','%2f'),expires=timeout/1000000)
         watcher.isExpired = temp.isExpired
         if limit:
             limit = ('--results',str(limit))
@@ -254,8 +266,10 @@ class Searches(Cache):
         action,done = start(*("search","-V")+limit+timeout+(kw,),stdout=STREAM)
         watcher.watch(action,done)
         # don't leave old searches around... they change
-        watcher.done.add_done_callback(lambda done: operator.delitem(self,kw))
+        watcher.done.add_done_callback(partial(self.maybederp,watcher))
         raise Return(watcher)
+    def maybederp(self, watcher, future):
+        ioloop.IOLoop.instance().call_later(10000,self.maybedel,watcher,kw))
     def check(self, watcher, kw, limit=None, timeout=None):
         # the watcher builds results streamily, 
         # so to save us from yield directory(...) every time here.
@@ -269,7 +283,7 @@ class Downloads(Cache):
         watcher = DownloadProgress()
         # can't use with statement, since might be downloading several times from many connections
         # just have to wait for the file to be reference dropped / garbage collected...
-        temp = tempo(chk[goofs+len('/chk/'):].split('/')[0])
+        temp = tempo(chk[goof+len('/chk/'):].split('/')[0])
         watcher.temp = temp
         if temp.new:
             action,exited = start("download","--verbose","--output",temp.name,chk,stdout=STREAM)

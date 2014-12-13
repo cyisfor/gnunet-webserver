@@ -57,7 +57,8 @@ def presentInfo(doc,dl,info):
         dl.append(dt)
         dl.append(dd)
 
-goofs = len('gnunet://fs')
+goofs = gnunet.goofs
+goof = gnunet.goof
 
 def buildLink(chk,name,info):
     href = chk
@@ -68,8 +69,8 @@ def buildLink(chk,name,info):
     return href
 
 def interpretLink(uri, info=None):
-    if uri.startswith('gnunet://fs'):
-        uri = uri[goofs:]
+    if uri.startswith(goofs):
+        uri = uri[goof:]
     if info:
         uri += '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
     return uri
@@ -103,7 +104,7 @@ def processDirectory(top, upper, here, info, path):
         note.yellow('entry',name)
         entry = doc.new_tag('tr')
         td = doc.new_tag('td')
-        td.append(chk[goofs+5:goofs+5+8])
+        td.append(chk[goof+5:goof+5+8])
         entry.append(td)
         td = doc.new_tag('td')
         a = doc.new_tag('a')
@@ -149,7 +150,7 @@ class Handler(baseserver.Handler):
             info = '/status/'+search.kw
             if search.sks:
                 check = '/sks/'
-                fancyname = search.keyword[goofs:goofs+8]
+                fancyname = search.keyword[goof+5:goof+5+8]
             else:
                 check = '/ksk/'
                 check += quote(gnunet.encode(search.keyword))
@@ -290,8 +291,8 @@ class Handler(baseserver.Handler):
 
 Handler.default = os.environ.get('root')
 if Handler.default:
-    if Handler.default.startswith('gnunet://fs'):
-        Handler.default = Handler.default[len('gnunet://fs'):]
+    if Handler.default.startswith(goofs):
+        Handler.default = Handler.default[goof:]
 else:
     Handler.default = '/status/'
 
