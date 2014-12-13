@@ -71,7 +71,11 @@ class Handler(myserver.ResponseHandler):
 
         self.kind = self.path[1:]
         self.kind,self.rest = self.kind.split('/',1)
-        self.ident,tail = self.rest.split('/',1)
+        try: self.ident,tail = self.rest.split('/',1)
+        except ValueError:
+            self.ident,self.meta = self.parseMeta(self.rest)
+            self.isDir = self.rest.endswith('/')
+            return
         self.filepath,self.meta = self.parseMeta(tail)
         if '/' in self.filepath:
             self.isDir = True
@@ -150,20 +154,6 @@ class Handler(myserver.ResponseHandler):
             ('m', 'mimetype')
             )
     def handleCHK(self):
-        try: path, query = self.rest.split('?',1)
-        except ValueError:
-            path = self.rest
-            info = {}
-        else:
-            info = dict((n,gnunet.decode(n,v)) for n,v in ((unquote(n),unquote(v)) for n,v in (e.split('=',1) for e in query.split('&'))))
-            for n,long in self.queryShortcuts:
-                if n in info:
-                    info[long] = info[n]
-                    del info[n]
-        try: 
-            self.ident, name = path.split('/',1)
-        except ValueError:
-            name = None
         chk = goofs + '/chk/' + self.ident
         # should we check if self.oldCHK is here, and set it to None if it matches?
         # how to "expire" downloads requested by CHK? Just wait for the cache to overflow, eh.
@@ -194,7 +184,7 @@ class Handler(myserver.ResponseHandler):
         "override this to do things with the contents of the file, transform HTML, check for spam, list directories, etc"
         # note: the type argument is more reliable than info['mimetype'] 
         # as it's guessed from the file contents even if info has no mimetype record
-        note('sending')
+        note('sending',type)
         temp.seek(0,0)
         yield self.send_header('Content-Type',type)
         modified = info.get('publication date')

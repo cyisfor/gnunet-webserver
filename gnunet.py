@@ -81,17 +81,17 @@ class ThingyParser:
         else:
             self.results = []
     def take(self,line):
-        note.cyan('directory line',line,self.getting)
+        #note.cyan('directory line',line)
         if not self.getting:
             if dircontents.match(line):
                 note.blue('yay self.getting',bold=True)
                 self.getting = True
             return False
         if not self.chk:
-            if line == '\n': return True # eof here
+            if line == '\n': #eof here
+                return True
             self.name,self.chk = self.parseCHK(line)
             self.meta = {}
-            note.magenta('got chk',self.chk)
         else:
             line = line.strip()
             if line:
@@ -104,22 +104,26 @@ class ThingyParser:
                     prop,value = line.split(': ',1)
                     self.meta[prop] = decode(prop,value)
             else:
+                chk = self.chk
+                self.chk = None
                 if self.examine:
-                    finished = self.examine(self.chk,self.name,self.meta)
+                    finished = self.examine(chk,self.name,self.meta)
                     if finished:
-                        diract.stdout.close()
                         return True
                 else:
-                    self.results.append((self.chk,self.name,self.meta))
-                self.chk = None
+                    self.results.append((chk,self.name,self.meta))
     def finish(self):
-        assert self.chk is None, "Didn't finish parsing directory!"
+        assert self.chk is None, "Didn't finish parsing directory! {} {}".format(self.chk,self.name)
         if not self.examine:
             return self.results
 
 class DirectoryParser(ThingyParser):
     def parseCHK(self, line):
-        name, chk = line.rsplit(' (',1)
+        try:
+            name, chk = line.rsplit(' (',1)
+        except ValueError:
+            note.alarm('dirparse bad',line)
+            os._exit(0)
         chk = chk[:-3] # extra paren, colon, newline
         return name,chk
 

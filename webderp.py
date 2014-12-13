@@ -80,7 +80,7 @@ def processDirectory(top, upper, here, info, path):
     doc = BeautifulSoup(directoryTemplate)
     nav = None
     head = doc.find('head')
-    def addLink(rel,href,name=None):
+    def addLink(href,rel,name=None):
         nonlocal nav
         link = doc.new_tag('link')
         link['rel'] = rel
@@ -90,9 +90,10 @@ def processDirectory(top, upper, here, info, path):
         link['href'] = href
         link.append(name or rel.title())
         if nav:
-            nav = doc.find(id='navigation')
-        else:
             nav.append(' ')
+        else:
+            nav = doc.find(id='nav')
+            assert(nav)
         nav.append(link)
     if top:
         addLink(interpretLink(top)+'/','first','Top')
@@ -251,7 +252,7 @@ class Handler(baseserver.Handler):
     @tracecoroutine
     def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
-        note.yellow('type',type,bold=True)
+        note.yellow('type',type,self.isDir,bold=True)
         if self.isDir:
             if len(self.filepath) > 0:
                 note.yellow('sub-entry here',self.filepath,bold=True)
@@ -288,7 +289,7 @@ class Handler(baseserver.Handler):
                     self.write("Oh a wise guy, eh? "+repr(self.filepath))
                 return
             # the directory itself, no sub-entry filename
-            doc = yield processDirectory(self.top,self.upper,self.uri,info,temp.name)
+            doc = yield processDirectory(self.top,self.upper,chk,info,temp.name)
             del temp
             raise Return(self.sendblob(str(doc).encode('utf-8'),'text/html'))
         elif type == 'text/html':
