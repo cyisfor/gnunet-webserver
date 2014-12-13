@@ -23,6 +23,7 @@ directoryTemplate = '''<!DOCTYPE html><html>
 </head>
 <body>
 <p>Listing for <span class="chk"/></p>
+<div id="nav"/>
 <dl id="info"/>
 <table id="entries">
 <th>CHK</th><th>Filename</th><th>Info</th>
@@ -50,9 +51,36 @@ def buildLink(chk,name,info):
         href += '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
     return href
 
+def interpretLink(uri, info=None):
+    if uri.startswith('gnunet://fs'):
+        uri = uri[goofs:]
+    if info:
+        uri += '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
+    return uri
+
 @tracecoroutine
-def processDirectory(info,path):
+def processDirectory(top, upper, here, info, path):
     doc = BeautifulSoup(directoryTemplate)
+    nav = None
+    head = doc.find('head')
+    def addLink(rel,href,name=None):
+        link = doc.new_tag('link')
+        link['rel'] = rel
+        link['href'] = href
+        head.append(link)
+        link = doc.new_tag('a')
+        link['href'] = href
+        link.append(name or rel.title())
+        if nav:
+            nav.append(' ')
+        else:
+            nav = doc.find(id='navigation')
+        nav.append(link)
+    if top:
+        addLink(interpretLink(top)+'/','first','Top')
+        addLink(interpretLink(here)+'/','next','Root here')
+    if upper:
+        addLink(interpretLink(upper)+'/','up','Up')
     presentInfo(doc,doc.find(id='info'),info)
     entries = doc.find(id='entries')
     def addEntry(chk,name,info):
@@ -90,6 +118,8 @@ class Handler(baseserver.Handler):
         yield self.set_length(len(blob))
         yield self.end_headers()
         raise Return(self.write(blob))
+    top = None
+    upper = None
     @tracecoroutine
     def sendfile(self,chk,name,info,temp,type,length):
         temp.seek(0,0)
@@ -111,6 +141,10 @@ class Handler(baseserver.Handler):
                 if gotit:
                     chk,name,info = gotit
                     if info['mimetype'] == 'application/gnunet-directory':
+                        if self.top is None:
+                            self.top = self.uri
+                        if self.upper is None:
+                            self.upper = self.uri
                         if self.filepath:
                             self.keyword,self.filepath = self.filepath.split('/',1)
                         else:
@@ -126,7 +160,7 @@ class Handler(baseserver.Handler):
                     self.write("Oh a wise guy, eh? "+repr(self.filepath))
                 return
             # the directory itself, no sub-entry filename
-            doc = yield processDirectory(info,temp.name)
+            doc = yield processDirectory(self.top,self.upper,self.uri,info,temp.name)
             del temp
             raise Return(self.sendblob(str(doc).encode('utf-8'),'text/html'))
         elif type == 'text/html':

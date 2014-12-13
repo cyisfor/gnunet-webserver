@@ -13,6 +13,7 @@ def fixlink(link):
     if not '://' in link: return link
     if link.startswith('gnunet://fs'):
         return link[len('gnunet://fs'):]
+    return '/checklink/'+urllib.parse.quote(link)
 
 noDisplay = re.compile('display:\s*none')
 
