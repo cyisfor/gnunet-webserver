@@ -32,6 +32,22 @@ directoryTemplate = '''<!DOCTYPE html><html>
 </html>
 '''
 
+statusTemplate = '''<!DOCTYPE html><html>
+<head>
+</head>
+<body>
+<p>Status</p>
+<div id="nav"/>
+<dl id="info"/>
+<table id="searches">
+<th>SKS</th><th>Results</th><th>Status</th><th>Actions</th>
+</table>
+<table id="downloads">
+<th>CHK</th><th>SKS</th><th>Progress</th><th>Actions</th>
+</table>
+</body>
+</html>
+'''
 def presentInfo(doc,dl,info):
     for n,v in info.items():
         dt = doc.new_tag('dt')
@@ -112,9 +128,49 @@ class Handler(baseserver.Handler):
     def __init__(self,*a,**kw):
         note.magenta("Creating a Handler!",id(self))
         super().__init__(*a,**kw)
-    def internal(self):
-        if not self.kind: 
-            self.redirect(self.default)
+    def handle(self):
+        return self.redirect(self.default)
+    def handleSTATUS(self):
+        self.isDir = '/' in self.rest
+        if not self.isDir:
+            return self.redirect(self.path + '/')
+        if self.ident:
+            try: self.kind, self.action = self.filepath.split('/',1)
+            except ValueError:
+                self.kind = self.filepath
+                self.action = None
+            if not self.action:
+                return self.showStatus()
+    def showStatus(self):
+        doc = BeautifulSoup(statusTemplate)
+        table = doc.find(id='searches')
+        for search in gnunet.searches:
+            info = '/status/'+search.kw
+            if search.sks:
+                check = '/sks/'
+            else:
+                check = '/ksk/'
+                check += quote(gnunet.encode(search.keyword))
+            info = {}
+            if search.supplemental:
+                info['keywords'] = search.supplemental
+            if info:
+                query = '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(v)) for n,v in info)
+            else:
+                query = ''
+            
+            row = doc.new_tag('tr')
+            table.append(row)
+            def cell(e):
+                td = doc.new_tag('td')
+                tr.append(td)
+                td.append(e)
+            a = doc.new_tag('a')
+            a['href'] = check + query
+            a.append(
+
+
+
     @tracecoroutine
     def sendblob(self,blob,type):
         yield self.send_header('Content-Type',type)
@@ -181,9 +237,12 @@ class Handler(baseserver.Handler):
         else:
             raise Return(super().sendfile(chk,name,info,temp,type,length))
 
-Handler.default = os.environ['root']
-if Handler.default.startswith('gnunet://fs'):
-    Handler.default = Handler.default[len('gnunet://fs'):]
+Handler.default = os.environ.get('root')
+if Handler.default:
+    if Handler.default.startswith('gnunet://fs'):
+        Handler.default = Handler.default[len('gnunet://fs'):]
+else:
+    Handler.default = '/status/'
 
 myserver.Server(Handler).listen(8444)
 ioloop.IOLoop.instance().start()

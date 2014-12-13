@@ -66,8 +66,8 @@ class Handler(myserver.ResponseHandler):
         # mimetype=application/gnunet-directory redirects to add '/' if not already isDir
         # ...because relative links screwed up if not end in '/'
 
-        self.kind,rest = self.path.split('/',1)
-        self.ident,tail = rest.split('/',1)
+        self.kind,self.rest = self.path.split('/',1)
+        self.ident,tail = self.rest.split('/',1)
         self.filepath,self.meta = self.parseMeta(tail)
         if '/' in self.filepath:
             self.isDir = True
