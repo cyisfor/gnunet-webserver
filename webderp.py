@@ -40,7 +40,7 @@ statusTemplate = '''<!DOCTYPE html><html>
 <div id="nav"/>
 <dl id="info"/>
 <table id="searches">
-<th>SKS</th><th>Results</th><th>Status</th><th>Actions</th>
+<th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
 </table>
 <table id="downloads">
 <th>CHK</th><th>SKS</th><th>Progress</th><th>Actions</th>
@@ -144,16 +144,20 @@ class Handler(baseserver.Handler):
     def showStatus(self):
         doc = BeautifulSoup(statusTemplate)
         table = doc.find(id='searches')
+        # <th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
         for search in gnunet.searches:
             info = '/status/'+search.kw
             if search.sks:
                 check = '/sks/'
+                fancyname = search.keyword[goofs:goofs+8]
             else:
                 check = '/ksk/'
                 check += quote(gnunet.encode(search.keyword))
+                fancyname = search.keyword
             info = {}
             if search.supplemental:
-                info['keywords'] = search.supplemental
+                info['keywords'] = ','.join(search.supplemental)
+                fancyname = fancyname + ' ' + ', '.join(search.supplemental)
             if info:
                 query = '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(v)) for n,v in info)
             else:
@@ -167,7 +171,53 @@ class Handler(baseserver.Handler):
                 td.append(e)
             a = doc.new_tag('a')
             a['href'] = check + query
-            a.append(
+            a.append(fancyname)
+            cell(a)
+            subtab = doc.new_tag('table')
+            def subrow(*a,head=False):
+                tr = doc.new_tag('tr')
+                for i in a:
+                    if i:
+                        td = doc.new_tag('th' if head else 'td')
+                        td.append(i)
+                        tr.append(td)
+                subtab.append(tr)
+            subrow('CHK','Name','Meta',head=True)
+            for result in results:
+                if result[2]:
+                    dl = doc.new_tag('dl')
+                    presentInfo(doc,dl,result[2])
+                else:
+                    dl = None
+                subrow(result[0],result[1],dl)
+            cell(subtab)
+            if result.request.running():
+                num = str(len(result.request._callbacks))
+                if result.done.running():
+                    cell('Requested ('+num+')')
+                else:
+                    cell('Requested ('+num+') (done)')
+            elif result.done.running():
+                cell('Searching')
+            else:
+                cell('Idle')
+            p = None
+            def action(ident,name):
+                nonlocal p
+                a = doc.new_tag('a')
+                a['href'] = info + ident
+                a.append(name)
+                if p:
+                    p.append(' ')
+                else:
+                    p = doc.new_tag('p')
+                p.append(a)
+            action('','Info')
+            action('interrupt','Stop Requests')
+            action('cancel','Stop Search')
+            action('forget','Forget Search')
+            # XXX: do the rest l8r
+
 
 
 
