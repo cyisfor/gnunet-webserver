@@ -13,7 +13,7 @@ from tornado.gen import Return
 from bs4 import BeautifulSoup
 
 import calendar
-from urllib.parse import quote
+from urllib.parse import quote,unquote
 
 import os
 oj = os.path.join
@@ -135,22 +135,25 @@ class Handler(baseserver.Handler):
     def handleSTATUS(self):
         if self.rest is None:
             return self.redirect(self.path + '/')
-        if self.ident:
-            try: self.kind, self.action = self.filepath.split('/',1)
-            except ValueError:
-                self.kind = self.filepath
-                self.action = None
+        self.action = self.filepath
         if self.action:
-            return getattr(self,'do'+self.action.title())()
-            return self.showStatus()
+            self.keywords = unquote(self.ident.replace('%2f','/')).split(',')
+            if len(self.keywords) == 1:
+                self.keywords = self.keywords[0]
+            else:
+                self.keywords = tuple(self.keywords)
+            getattr(self,'do'+self.action.title())()
+            return self.redirect('/status/')
+        return self.showStatus()
     def doInterrupt(self): pass
     def doCancel(self):
-        keywords = self.ident.split(',')
-        if len(keywords) == 0:
-            keywords = keywords[0]
-        note.magenta('keywords',keywords)
-        search = searches[keywords]
+        note.magenta('keywords',self.keywords)
+        search = gnunet.searches[self.keywords]
         search.cancel()
+    def doForget(self):
+        note.magenta('forgetting',self.keywords)
+        self.doCancel()
+        del gnunet.searches[self.keywords]
     def doInfo(self):
         self.write("derp")    
     def showStatus(self):
@@ -158,7 +161,11 @@ class Handler(baseserver.Handler):
         table = doc.find(id='searches')
         # <th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
         for keywords,search in gnunet.searches.items():
-            status = '/status/'+','.join(keywords)
+            key = keywords
+            if not isinstance(key,str):
+                key = ','.join(key)
+            key = quote(key).replace('/','%2f')
+            status = '/status/'+key
             if search.sks:
                 check = '/sks/'
                 fancyname = search.keyword[goof+5:goof+5+8]

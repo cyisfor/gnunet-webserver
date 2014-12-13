@@ -64,10 +64,12 @@ dircontents = re.compile("Directory `.*?\' contents:\n")
 
 startpat = re.compile('gnunet-download -o "(.*?)".*?(gnunet://.*)')
 
+assert(startpat.match('gnunet-download -o "code_.gnd" -R gnunet://fs/chk/TA43MVYYT8SKP3DM2SQK85622GHVZWE6X3GDD32B3XA5ZHTY24PZHFFDG3FXXZZE9FYBWRPNC6EEYJHBCR0MZTT9EMD5PQ8TKZGHDTR.4AB6TWG96QYFEAZAMYGA7J2SMSK1THXXVAXTYB40JP0883MMTTBCDZHFV8M8N6YXZDRCH1WQ28NP8HFESZQKDDZ5CWB13XQPKCBW8F0.31039').groups()==('code_.gnd','gnunet://fs/chk/TA43MVYYT8SKP3DM2SQK85622GHVZWE6X3GDD32B3XA5ZHTY24PZHFFDG3FXXZZE9FYBWRPNC6EEYJHBCR0MZTT9EMD5PQ8TKZGHDTR.4AB6TWG96QYFEAZAMYGA7J2SMSK1THXXVAXTYB40JP0883MMTTBCDZHFV8M8N6YXZDRCH1WQ28NP8HFESZQKDDZ5CWB13XQPKCBW8F0.31039'))
+
 goofs = 'gnunet://fs'
 goof = len(goofs)
 
-class DirectoryParser:
+class ThingyParser:
     getting = False
     chk = None
     name = None
@@ -75,7 +77,7 @@ class DirectoryParser:
     def __init__(self):
         self.results = []
     def take(self,line):
-        note.cyan('directory',line)
+        note.cyan('directory line',line)
         if not self.getting:
             if dircontents.match(line):
                 note.blue('yay self.getting',bold=True)
@@ -83,10 +85,7 @@ class DirectoryParser:
             return False
         if not self.chk:
             if line == '\n': return True # eof here
-            # sigh... gnunet-search -V harder to parse than gnunet-directory
-            match = startpat.search(line)
-            assert match, "bad line "+line
-            self.name,self.chk = match.groups()
+            self.name,self.chk = self.parseCHK(line)
             self.meta = {}
             note.magenta('got chk',self.chk)
         else:
@@ -112,6 +111,18 @@ class DirectoryParser:
     def finish(self):
         assert self.chk is None, "Didn't finish parsing directory!"
         return self.results
+
+class DirectoryParser(ThingyParser):
+    def parseCHK(self, line):
+        name, chk = line.rsplit(' (',1)
+        chk = chk[:-3] # extra paren, colon, newline
+        return name,chk
+
+class SearchParser(ThingyParser):
+    def parseCHK(self, line):
+        match = startpat.match(line)
+        assert match, "bad line "+line
+        return match.groups()
 
 @tracecoroutine
 def directory(path,examine=None):
@@ -274,9 +285,9 @@ class Searches(Cache):
         action,done = start(*("search","-V")+limit+timeout+(kw,),stdout=STREAM)
         watcher.watch(action,done)
         # don't leave old searches around... they change
-        watcher.done.add_done_callback(partial(self.maybederp,watcher))
+        watcher.done.add_done_callback(partial(self.maybederp,watcher,kw))
         raise Return(watcher)
-    def maybederp(self, watcher, future):
+    def maybederp(self, watcher, kw, future):
         # eh, leave 'em around for like 10 seconds maybe
         ioloop.IOLoop.instance().call_later(10000,self.maybedel,watcher,kw)
     def check(self, watcher, kw, limit=None, timeout=None):
