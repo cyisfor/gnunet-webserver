@@ -74,10 +74,14 @@ class ThingyParser:
     chk = None
     name = None
     meta = None
-    def __init__(self):
-        self.results = []
+    examine = None
+    def __init__(self,examine=None):
+        if examine:
+            self.examine = examine
+        else:
+            self.results = []
     def take(self,line):
-        note.cyan('directory line',line)
+        note.cyan('directory line',line,self.getting)
         if not self.getting:
             if dircontents.match(line):
                 note.blue('yay self.getting',bold=True)
@@ -100,8 +104,8 @@ class ThingyParser:
                     prop,value = line.split(': ',1)
                     self.meta[prop] = decode(prop,value)
             else:
-                if examine:
-                    finished = examine(self.chk,self.name,self.meta)
+                if self.examine:
+                    finished = self.examine(self.chk,self.name,self.meta)
                     if finished:
                         diract.stdout.close()
                         return True
@@ -110,7 +114,8 @@ class ThingyParser:
                 self.chk = None
     def finish(self):
         assert self.chk is None, "Didn't finish parsing directory!"
-        return self.results
+        if not self.examine:
+            return self.results
 
 class DirectoryParser(ThingyParser):
     def parseCHK(self, line):
@@ -119,17 +124,17 @@ class DirectoryParser(ThingyParser):
         return name,chk
 
 class SearchParser(ThingyParser):
+    getting = True
     def parseCHK(self, line):
         match = startpat.match(line)
-        assert match, "bad line "+line
+        if not match:
+            return None, None
         return match.groups()
 
 @tracecoroutine
 def directory(path,examine=None):
-    if not examine:
-        results = []
     diract,done = start('directory',path,stdout=STREAM)
-    parser = DirectoryParser()
+    parser = DirectoryParser(examine)
     while True:
         try: line = yield diract.stdout.read_until(b'\n')
         except StreamClosedError: break
@@ -141,9 +146,7 @@ def directory(path,examine=None):
     if not examine:
         if not parser.results:
             note.yellow('warning, empty directory',path)
-        raise Return(parser.finish())
-    else:
-        note('examining')
+    raise Return(parser.finish())
 
 class Cancellable:
     action = None
@@ -179,7 +182,7 @@ class SearchProgress(Cancellable):
             self.supplemental = kw[1:]
         if self.keyword.startswith(goofs+'/sks/'):
             self.sks = True
-        self.parser = DirectoryParser()
+        self.parser = SearchParser()
         super().__init__()
     def watch(self,action,done):
         action.stdout.read_until_close(callback=self.dumpbuf,
@@ -217,6 +220,8 @@ class DownloadProgress(Cancellable):
     rate=0
     unit=None
     lastblock=None
+    type = None
+    length = None
 
     needlasttime = False
 
@@ -250,9 +255,10 @@ class Cache(pylru.lrucache):
         # even if search is not done.
         # but try to return results sooner if we can.
         try: 
-            code = yield gen.with_timeout(1000, watcher.done)
+            code = yield gen.with_timeout(time.time()+1, watcher.done)
             note.magenta(type(self),'finished code',code)
-        except gen.TimeoutError: pass
+        except gen.TimeoutError: 
+            note.red('timeout')
         watcher.finished = self.check(watcher,key,*a,**kw)
         raise Return(watcher.finished)
     def maybedel(self,old,kw):
@@ -310,9 +316,11 @@ class Downloads(Cache):
             watcher.watch(action,exited)
             note('downloadid')
             exited.add_done_callback(lambda *a: temp.commit())
-            exited.add_done_callback(lambda exited: self.finish(modification))
+            exited.add_done_callback(lambda exited: self.finish(watcher,modification))
+        else:
+            watcher.done = success(0)
         # DO leave old downloads around... makes things way easier
-        return watcher
+        return success(watcher)
     @tracecoroutine
     def check(self, watcher, chk, type=None, modification=None):
 # comment this out enables partials
@@ -320,8 +328,8 @@ class Downloads(Cache):
 # better to see a partial file, or a "still downloadan"?
 #        if watcher.done.running():
 #            return False
-        if not self.type:
-            self.type= type
+        if not watcher.type:
+            watcher.type= type
         if watcher.done.running() or watcher.needlasttime:
             if watcher.needlasttime:
                 watcher.needlasttime = False
@@ -332,7 +340,7 @@ class Downloads(Cache):
                     watcher.length = watcher.temp.tell()
                     if not watcher.done.running() or watcher.length > 0:
                         break
-                    yield gen.with_timeout(1000,watcher.done)
+                    yield gen.with_timeout(time.time()+1,watcher.done)
             if not watcher.type:
                 watcher.type = derpmagic.guess_type(watcher.temp.fileno())[0]
                 note.yellow('type guessed',type)
@@ -346,7 +354,7 @@ class Downloads(Cache):
         # will cause the first connection's progress to start over, and
         # connections to get mixed pieces of the file
         raise Return((watcher.temp,type,watcher.length))
-    def finish(self,modification):
+    def finish(self,watcher,modification):
         if modification:
             note.yellow('mod',modification)
             os.utime(watcher.temp.name,(modification,modification))

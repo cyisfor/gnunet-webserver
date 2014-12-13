@@ -81,6 +81,7 @@ def processDirectory(top, upper, here, info, path):
     nav = None
     head = doc.find('head')
     def addLink(rel,href,name=None):
+        nonlocal nav
         link = doc.new_tag('link')
         link['rel'] = rel
         link['href'] = href
@@ -89,9 +90,9 @@ def processDirectory(top, upper, here, info, path):
         link['href'] = href
         link.append(name or rel.title())
         if nav:
-            nav.append(' ')
-        else:
             nav = doc.find(id='navigation')
+        else:
+            nav.append(' ')
         nav.append(link)
     if top:
         addLink(interpretLink(top)+'/','first','Top')
