@@ -111,6 +111,8 @@ def processDirectory(top, upper, here, info, path):
         td = doc.new_tag('td')
         a = doc.new_tag('a')
         a['href'] = name # relative links woo
+        if info:
+            a['href'] += '?' + '&'.join(quote(n)+'='+quote(gnunet.encode(n,v)) for n,v in info.items())
         a['id'] = chk # don't go to this, since we want to remember our parent directory
         a.append(name)
         td.append(a)
@@ -161,6 +163,7 @@ class Handler(baseserver.Handler):
         table = doc.find(id='searches')
         # <th>Keywords</th><th>Results</th><th>Status</th><th>Actions</th>
         for keywords,search in gnunet.searches.items():
+            note.magenta('got keyword',keywords)
             key = keywords
             if not isinstance(key,str):
                 key = ','.join(key)
@@ -202,13 +205,13 @@ class Handler(baseserver.Handler):
                         tr.append(td)
                 subtab.append(tr)
             subrow('CHK','Name','Meta',head=True)
-            for result in search.parser.results:
+            for result in sorted(search.parser.results,reverse=True, key=lambda result: result[2]['publication date']):
                 if result[2]:
                     dl = doc.new_tag('dl')
                     presentInfo(doc,dl,result[2])
                 else:
                     dl = None
-                subrow(result[0],result[1],dl)
+                subrow(result[0][goof+5:goof+5+8],result[1],dl)
             cell(subtab)
             if search.finished.running():
                 num = str(len(result.finished._callbacks))
@@ -252,10 +255,8 @@ class Handler(baseserver.Handler):
         temp.seek(0,0)
         note.yellow('type',type,self.isDir,bold=True)
         if self.isDir:
-            if len(self.filepath) > 0:
-                try: test,self.filepath = self.filepath.split('/',1)
-                except ValueError:
-                    test = self.filepath
+            if self.filepath and len(self.filepath) > 0:
+                test = self.filepath.split('/',1)[0] # hax?
                 note.yellow('sub-entry here',self.filepath,test,bold=True)
                 # now find the chk/info of the filename in this directory
                 gotit = False
@@ -269,16 +270,21 @@ class Handler(baseserver.Handler):
                 note.cyan('wanted',repr(self.filepath),bold=True)
                 yield gnunet.directory(temp.name,oneResult)
                 if gotit:
+                    subchk,name,info = gotit
+                    note.cyan('info',info)
                     if info['mimetype'] == 'application/gnunet-directory':
                         if self.top is None:
-                            self.top = self.path
+                            self.top = self.path[:5] + self.path[5:].split('/',1)[0] 
+                            if self.keyword:
+                                self.top += '/' + self.keyword 
                         self.upper = chk
                     else:
                         assert not '/' in test, "No subdirs below a normal file!"
                         self.isDir = False
-                    chk,name,info = gotit
+                    self.filepath = self.filepath.split('/',1)[-1]
                     # going down....
-                    raise Return(self.startDownload(chk,name,info))
+                    note.red('going down to',name)
+                    raise Return(self.startDownload(subchk,name,info))
                 else:
                     # a filename not in this directory.
                     note.alarm("Oh a wise guy, eh? "+repr(self.filepath))

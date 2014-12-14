@@ -71,17 +71,14 @@ class Handler(myserver.ResponseHandler):
 
         self.kind = self.path[1:]
         self.kind,self.rest = self.kind.split('/',1)
-        try: self.ident,tail = self.rest.split('/',1)
+        try: 
+            self.ident,tail = self.rest.split('/',1)
         except ValueError:
             self.ident,self.meta = self.parseMeta(self.rest)
             self.isDir = self.rest.endswith('/')
             return
         self.filepath,self.meta = self.parseMeta(tail)
-        if not self.filepath or '/' in self.filepath:
-            self.isDir = True
-        else:
-            note.alarm('not a dirr',self.filepath)
-            os._exit(3)
+        self.isDir = True
         # check for mimetype directory later not now since SKS can add it
     oldCHK = None
     def handleSKS(self):
@@ -116,6 +113,7 @@ class Handler(myserver.ResponseHandler):
             try: searches[self.uri].pause()
             except KeyError: pass
             raise
+        results = gnunet.searches[self.uri].parser.results
         if not results:
             self.write("No results yet bleh "+self.uri+'\n')
             return
@@ -179,6 +177,7 @@ class Handler(myserver.ResponseHandler):
         temp,type,length = yield gnunet.download(chk,type,modification)
         # and now we have the best hope to know the type
         if not self.isDir and type == 'application/gnunet-directory':
+            note.blue('making dirifydiret')
             self.redirect(self.path+'/')
         result = yield self.sendfile(chk,name,info,temp,type,length)
         raise Return(result)
@@ -190,7 +189,7 @@ class Handler(myserver.ResponseHandler):
         note('sending',type)
         temp.seek(0,0)
         assert type, 'bleh'
-        yield self.send_header('Content-Type',type)
+        yield self.send_header('Content-Type',type+'; charset=utf-8')
         modified = info.get('publication date')
         if modified:
             yield self.send_header('Last-Modified',self.date_time_string(modified))

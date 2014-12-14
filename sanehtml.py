@@ -2,6 +2,8 @@
 import note
 import sanestyle
 
+import gnunet
+
 from bs4 import BeautifulSoup,Comment
 import sys,re,os
 import urllib.parse
@@ -11,13 +13,13 @@ def group1(match):
 
 def fixlink(link):
     if not '://' in link: return link
-    if link.startswith('gnunet://fs'):
-        return link[len('gnunet://fs'):]
+    if link.startswith(gnunet.goofs):
+        return link[len(gnunet.goofs):]
     return '/checklink/'+urllib.parse.quote(link)
 
 noDisplay = re.compile('display:\s*none')
 
-def sanitize(doc,base=None):
+def sanitize(doc):
     for script in doc.findAll('script'):
         script.extract();
     for comment in doc.findAll(text=lambda c: isinstance(c,Comment)):
@@ -47,8 +49,8 @@ def sanitize(doc,base=None):
                 d.append(attr)
                 continue
             if isSafe: 
-                if base and attr == 'href':
-                    e.attrs[attr] = urllib.parse.urljoin(base,value)
+                if attr == 'href':
+                    e.attrs[attr] = fixlink(e.attrs['href'])
                 continue
             # all unsafe hrefs get scrambled
             if not isinstance(value,list):

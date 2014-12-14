@@ -156,6 +156,7 @@ class Cancellable:
     action = None
     done = None
     cancelled = True # starts out needing finalizing?
+    finished = None
     def __init__(self):
         super().__init__()
     def cancel(self):
@@ -268,6 +269,7 @@ class Cache(pylru.lrucache):
     def maybedel(self,old,kw):
         try: watcher = self[kw]
         except KeyError: return
+        return # meh
         if watcher is old:
             del self[kw]
 
